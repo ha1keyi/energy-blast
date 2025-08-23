@@ -49,4 +49,4 @@ window.game = game;
 // 将调试UI管理器也暴露到全局
 window.debugUI = debugUIManager;
 
-console.log('Game initialized!');
+console.log('Energy Blast initialized!');

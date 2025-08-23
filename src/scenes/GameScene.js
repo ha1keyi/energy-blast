@@ -20,7 +20,7 @@ export class GameScene extends Phaser.Scene {
         logo.setScale(0.5);
 
         // 添加文字说明
-        this.add.text(400, 400, 'STORE AND ATTACK', {
+        this.add.text(400, 400, 'Energy Blast', {
             fontSize: '32px',
             fill: '#fff',
             align: 'center'
