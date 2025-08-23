@@ -1,4 +1,5 @@
 // src/scenes/GameScene.js
+import Phaser from 'phaser';
 export class GameScene extends Phaser.Scene {
     constructor() {
         super({ key: 'GameScene' });
@@ -27,6 +28,26 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         console.log('GameScene created successfully!');
+
+        // 监听游戏结束，回到大厅
+        this.endWatcher = this.time.addEvent({
+            delay: 500, loop: true, callback: () => {
+                const core = window.game;
+                if (core?.gameState === 'ended') {
+                    this.scene.start('LobbyScene');
+                }
+            }
+        });
+
+        // 退出到主页按钮（可选）
+        const { width } = this.scale;
+        const quit = this.add.text(width - 120, 20, '退出到主页', { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#fff' })
+            .setInteractive({ useHandCursor: true });
+        quit.on('pointerdown', () => {
+            const core = window.game;
+            core?.endGame();
+            this.scene.start('HomeScene');
+        });
     }
 
     update() {

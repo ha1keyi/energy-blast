@@ -5,9 +5,15 @@
   box-sizing: border-box;
 }
 
+/* 手绘黑白主题 */
+@import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
+
 body {
-  font-family: Arial, sans-serif;
-  background: #000;
+  font-family: 'ZCOOL KuaiLe', cursive, Arial, sans-serif;
+  background-color: #fff;
+  /* 简单手绘格纹背景 */
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23222' fill-opacity='0.08'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  color: #222;
   overflow: hidden;
 }
 
@@ -17,6 +23,95 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+  position: relative;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* UI 容器（手绘描边卡片） */
+#ui-container {
+  text-align: center;
+  background: #fff;
+  padding: 40px;
+  border: 3px solid #222;
+  border-radius: 15px 225px 15px 255px / 255px 15px 225px 15px;
+  box-shadow: 6px 6px 0 #222;
+  max-width: 640px;
+}
+
+h1 {
+  font-size: 3rem;
+  margin-bottom: 20px;
+}
+
+h2 {
+  font-size: 2rem;
+  margin-bottom: 16px;
+}
+
+button {
+  font-family: 'ZCOOL KuaiLe', cursive;
+  font-size: 1.2rem;
+  padding: 10px 20px;
+  border: 3px solid #222;
+  background: #fff;
+  color: #222;
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 4px 4px 0 #222;
+  transition: transform .1s ease, box-shadow .1s ease, background .1s ease;
+  margin: 6px;
+}
+
+button:hover {
+  background: #f5f5f5;
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 #222;
+}
+
+button:active {
+  background: #eee;
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 #222;
+}
+
+.player-list-container {
+  min-height: 150px;
+  border: 2px dashed #999;
+  padding: 10px;
+  margin: 10px 0 20px;
+}
+
+#player-list {
+  list-style: none;
+}
+
+#player-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 2px;
+  font-size: 1.1rem;
+}
+
+.player-status {
+  color: #888;
+  font-style: italic;
+}
+
+.player-status.ready {
+  color: #2ecc71;
+}
+
+#lobby-status {
+  margin-top: 10px;
+  color: #444;
+}
+
+#game-container {
+  position: absolute;
+  inset: 0;
 }
 
 /* 调试面板样式 */

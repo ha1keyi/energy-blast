@@ -11,6 +11,7 @@ export class DebugUIManager {
     setupDebugUI() {
         this.createDebugPanel();
         this.bindEvents();
+        this.updateLobbyList();
         this.updatePlayerList();
     }
 
@@ -50,13 +51,23 @@ export class DebugUIManager {
                 <button id="end-game" style="background: #e74c3c; margin-left: 8px;">结束游戏</button>
             </div>
 
-            <div style="margin-bottom: 15px;">
-                <h4 style="margin: 0 0 10px 0; color: #3498db;">玩家管理</h4>
+                        <div style="margin-bottom: 15px;">
+                                <h4 style="margin: 0 0 10px 0; color: #3498db;">玩家管理（大厅/游戏）</h4>
                 <div style="display: flex; gap: 8px; margin-bottom: 10px;">
                     <input type="text" id="new-player-name" placeholder="玩家名称" style="flex: 1; padding: 5px;">
                     <button id="add-player" style="background: #2ecc71;">新增玩家</button>
+                    <button id="toggle-ready" style="background: #8e44ad;">切换自己准备</button>
                 </div>
-                <div id="player-list"></div>
+                                <div style="display: grid; gap: 8px;">
+                                    <div>
+                                        <div style="font-weight:bold; margin-bottom:6px; color:#f1c40f;">大厅玩家</div>
+                                        <div id="debug-lobby-list"></div>
+                                    </div>
+                                    <div>
+                                        <div style="font-weight:bold; margin:8px 0 6px; color:#1abc9c;">游戏内玩家</div>
+                                        <div id="debug-player-list"></div>
+                                    </div>
+                                </div>
             </div>
 
             <div style="margin-bottom: 15px;">
@@ -106,18 +117,90 @@ export class DebugUIManager {
             this.updateGameState();
         });
 
-        // 新增玩家
+        // 新增玩家（优先加入大厅，若未使用大厅则加入游戏）
         document.getElementById('add-player').addEventListener('click', () => {
             const nameInput = document.getElementById('new-player-name');
-            const name = nameInput.value.trim() || `玩家 ${this.game.players.length + 1}`;
+            const name = nameInput.value.trim() || `玩家 ${(window.lobby?.players?.length || this.game.players.length) + 1}`;
 
-            this.game.addPlayer(name);
+            if (window.lobby) {
+                window.lobby.add(name);
+                // 刷新大厅与调试列表
+                if (typeof window.renderLobby === 'function') window.renderLobby();
+                this.updateLobbyList();
+            } else {
+                this.game.addPlayer(name);
+                this.updatePlayerList();
+            }
             nameInput.value = '';
+        });
+
+        // 切换自己准备（仅大厅有效）
+        document.getElementById('toggle-ready').addEventListener('click', () => {
+            if (window.lobby) {
+                const self = window.lobby.get(1) || window.lobby.add('玩家1 (你)');
+                self.ready = !self.ready;
+                if (typeof window.renderLobby === 'function') window.renderLobby();
+                this.updateLobbyList();
+                // 若所有人准备好则走大厅开始流程
+                if (window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
+                    window.startGameFromLobby();
+                }
+            }
+        });
+    }
+
+    updateLobbyList() {
+        const container = document.getElementById('debug-lobby-list');
+        if (!container) return;
+        if (!window.lobby) {
+            container.innerHTML = '<div style="opacity:.7;">无大厅（直接向游戏添加玩家）</div>';
+            return;
+        }
+        const players = window.lobby.players || [];
+        if (!players.length) {
+            container.innerHTML = '<div style="opacity:.7;">暂无玩家</div>';
+            return;
+        }
+        container.innerHTML = players.map(p => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px; background: rgba(255,255,255,0.08); border-radius:4px; margin-bottom:6px;">
+                        <div>
+                            <strong>${p.name}</strong>
+                            <span style="margin-left:8px; font-size:12px; color:${p.ready ? '#2ecc71' : '#bdc3c7'};">${p.ready ? '已准备' : '未准备'}</span>
+                        </div>
+                        <div style="display:flex; gap:6px;">
+                            <button class="lobby-toggle-ready" data-id="${p.id}" style="background:#8e44ad; padding:4px 8px;">切换准备</button>
+                            <button class="lobby-remove" data-id="${p.id}" style="background:#e74c3c; padding:4px 8px;">删除</button>
+                        </div>
+                    </div>
+                `).join('');
+
+        // 绑定事件
+        container.querySelectorAll('.lobby-toggle-ready').forEach(btn => {
+            btn.onclick = (e) => {
+                const id = parseInt(e.currentTarget.dataset.id);
+                const p = window.lobby.get(id);
+                if (!p) return;
+                p.ready = !p.ready;
+                if (typeof window.renderLobby === 'function') window.renderLobby();
+                this.updateLobbyList();
+                if (window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
+                    window.startGameFromLobby();
+                }
+            };
+        });
+        container.querySelectorAll('.lobby-remove').forEach(btn => {
+            btn.onclick = (e) => {
+                const id = parseInt(e.currentTarget.dataset.id);
+                if (!window.lobby) return;
+                window.lobby.players = window.lobby.players.filter(p => p.id !== id);
+                if (typeof window.renderLobby === 'function') window.renderLobby();
+                this.updateLobbyList();
+            };
         });
     }
 
     updatePlayerList() {
-        const playerList = document.getElementById('player-list');
+        const playerList = document.getElementById('debug-player-list');
         playerList.innerHTML = '';
 
         this.game.players.forEach((player, index) => {
@@ -250,6 +333,7 @@ export class DebugUIManager {
     startUpdating() {
         setInterval(() => {
             this.updateGameState();
+            this.updateLobbyList();
         }, 1000);
     }
 

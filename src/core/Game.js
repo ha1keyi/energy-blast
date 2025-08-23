@@ -143,7 +143,6 @@ export class Game {
                 // 确保目标存活且未被处理
                 if (attackee.isAlive && !processed.has(attackee.id)) {
                     const result = this.executeAttack(attacker, attackee);
-                    this.addLog(result.message);
 
                     processed.add(attacker.id);
                     processed.add(attackee.id);
@@ -174,6 +173,8 @@ export class Game {
             );
             result = strategy.execute(attacker, attackee);
         }
+        // 统一在此处记录日志
+        this.addLog(result.message);
         return result;
     }
 
