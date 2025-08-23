@@ -100,63 +100,99 @@ export class Game {
         }
     }
 
-    resolveActions() {
+    async resolveActions() {
         if (this.gameState !== 'selecting') return;
 
         this.gameState = 'resolving';
-        // It's possible to get here via manual "Resolve Now" button, so ensure timer is cleared.
+        this.clearTimer();
+
+        this.addLog('开始解析操作...');
+
+        // 分步骤执行，避免阻塞主线程
+        await this.processRound();
+    }
+
+    async processRound() {
+        await this.adjustPlayerEnergies();
+        await this.resolveCombat();
+        await this.finalizeRound();
+    }
+
+    async adjustPlayerEnergies() {
+        const alivePlayers = this.players.filter(p => p.isAlive);
+        for (const player of alivePlayers) {
+            if (player.currentAction) {
+                player.adjustEnergy();
+            }
+        }
+        // 更新UI显示最新的气量
+        if (this.debugUIManager) this.debugUIManager.updatePlayerList();
+        await this.nextFrame();
+    }
+
+    async resolveCombat() {
+        const alivePlayers = this.players.filter(p => p.isAlive);
+        const processed = new Set();
+
+        for (const attacker of alivePlayers) {
+            if (processed.has(attacker.id)) continue;
+
+            if (attacker.currentAction?.type === ActionType.ATTACK && attacker.target) {
+                const attackee = attacker.target;
+
+                // 确保目标存活且未被处理
+                if (attackee.isAlive && !processed.has(attackee.id)) {
+                    const result = this.executeAttack(attacker, attackee);
+                    this.addLog(result.message);
+
+                    processed.add(attacker.id);
+                    processed.add(attackee.id);
+
+                    // 更新UI显示战斗结果
+                    if (this.debugUIManager) this.debugUIManager.updatePlayerList();
+                    await this.nextFrame(); // 关键：每处理一个攻击等待一帧
+                }
+            }
+        }
+    }
+
+    executeAttack(attacker, attackee) {
+        // 封装了原有的策略模式战斗逻辑
+        let result;
+        if (attackee.target && attackee.target.id !== attacker.id) {
+            const damage = attacker.currentAction.getActualDamage();
+            attackee.takeDamage(damage);
+            result = {
+                message: `${attacker.name}偷袭了正在攻击他人的${attackee.name}，造成${damage}点伤害`,
+                damage: damage,
+                type: 'sneak-attack'
+            };
+        } else {
+            const strategy = StrategyFactory.getStrategyForActions(
+                attacker.currentAction,
+                attackee.currentAction
+            );
+            result = strategy.execute(attacker, attackee);
+        }
+        return result;
+    }
+
+    async finalizeRound() {
+        await this.nextFrame();
+        if (!this.checkGameEnd()) {
+            this.prepareNextRound();
+        }
+    }
+
+    nextFrame() {
+        return new Promise(resolve => requestAnimationFrame(resolve));
+    }
+
+    clearTimer() {
         if (this.timer) {
             clearTimeout(this.timer);
             this.timer = null;
         }
-
-        this.addLog('解析操作...');
-
-        this.players.forEach(player => {
-            if (player.isAlive && player.currentAction) {
-                player.adjustEnergy();
-            }
-        });
-
-        const attackResults = [];
-        this.players.forEach(attacker => {
-            if (attacker.isAlive &&
-                attacker.currentAction &&
-                attacker.currentAction.type === ActionType.ATTACK &&
-                attacker.target) {
-
-                const attackee = attacker.target;
-                if (!attackee.isAlive) {
-                    this.addLog(`${attacker.name}攻击了已经倒下的${attackee.name}，无效！`);
-                    return;
-                }
-
-                let result;
-
-                if (attackee.target && attackee.target.id !== attacker.id) {
-                    const damage = attacker.currentAction.getActualDamage();
-                    attackee.takeDamage(damage);
-                    result = {
-                        message: `${attacker.name}偷袭了正在攻击他人的${attackee.name}，造成${damage}点伤害`,
-                        damage: damage,
-                        type: 'sneak-attack'
-                    };
-                } else {
-                    const strategy = StrategyFactory.getStrategyForActions(
-                        attacker.currentAction,
-                        attackee.currentAction
-                    );
-                    result = strategy.execute(attacker, attackee);
-                }
-
-                attackResults.push(result);
-                this.addLog(result.message);
-            }
-        });
-
-        this.checkGameEnd();
-
-        this.prepareNextRound();
     }
 
     checkGameEnd() {
