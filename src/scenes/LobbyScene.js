@@ -9,16 +9,26 @@ export class LobbyScene extends Phaser.Scene {
         const { width, height } = this.scale;
 
         // Fallback background: white fill with black dashed border
+        // Draw UI container panel on transparent background
+        const containerW = Math.round(Math.min(640, width * 0.8));
+        const containerH = Math.round(Math.min(480, height * 0.75));
+        const cx = Math.round((width - containerW) / 2);
+        const cy = Math.round((height - containerH) / 2);
+        const radius = 16;
         const graphics = this.add.graphics();
-        graphics.fillStyle(0xffffff, 1).fillRect(0, 0, width, height);
-        graphics.lineStyle(8, 0x000000, 1).strokeRect(0, 0, width, height);
+        // Shadow
+        graphics.fillStyle(0x222222, 1).fillRoundedRect(cx + 6, cy + 6, containerW, containerH, radius);
+        // Container background
+        graphics.fillStyle(0xffffff, 1).fillRoundedRect(cx, cy, containerW, containerH, radius);
+        // Border
+        graphics.lineStyle(3, 0x222222, 1).strokeRoundedRect(cx, cy, containerW, containerH, radius);
 
-        this.add.text(width / 2, height * 0.12, '对战房间', {
+        this.add.text(Math.round(width / 2), cy + 32, '对战房间', {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '40px', color: '#000', stroke: '#fff', strokeThickness: 6
         }).setOrigin(0.5);
 
         // Buttons: Back, Share, Ready
-        const uiY = height * 0.2;
+        const uiY = cy + 72;
         const makeBtn = (x, text, onClick) => {
             const rect = this.add.rectangle(x, uiY, 160, 46, 0xffffff, 0.92).setStrokeStyle(3, 0x000000).setInteractive({ useHandCursor: true });
             const label = this.add.text(x, uiY, text, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '22px', color: '#000' }).setOrigin(0.5);
@@ -45,9 +55,14 @@ export class LobbyScene extends Phaser.Scene {
         this.readyBtnLabel = readyBtn.label;
 
         // Player list panel
-        const panel = this.add.rectangle(width / 2, height * 0.6, Math.min(600, width * 0.8), Math.min(360, height * 0.6), 0xffffff, 0.92)
-            .setStrokeStyle(3, 0x000000);
-        this.listOrigin = { x: panel.x - panel.width / 2 + 20, y: panel.y - panel.height / 2 + 20, w: panel.width - 40 };
+        // Player list panel
+        const listW = containerW - 40;
+        const listH = containerH - 200;
+        const listX = cx + 20;
+        const listY = cy + 120;
+        const panel = this.add.rectangle(listX + listW / 2, listY + listH / 2, listW, listH, 0xffffff, 0)
+            .setInteractive();
+        this.listOrigin = { x: listX, y: listY, w: listW };
 
         this.listItems = [];
         this.refresh();
@@ -81,11 +96,7 @@ export class LobbyScene extends Phaser.Scene {
             const row = this.add.rectangle(x + w / 2, oy + rowH / 2, w, rowH, 0xffffff, 1).setStrokeStyle(2, 0x000000);
             const name = this.add.text(x + 10, oy + 8, p.name, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000' });
             const status = this.add.text(x + w - 220, oy + 8, p.ready ? '已准备' : '未准备', { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: p.ready ? '#27ae60' : '#333' });
-            const toggle = this.add.text(x + w - 140, oy + 8, '切换', { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000' }).setInteractive({ useHandCursor: true });
-            const del = this.add.text(x + w - 76, oy + 8, '删除', { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#e74c3c' }).setInteractive({ useHandCursor: true });
-            toggle.on('pointerdown', () => { LobbyManager.toggleReady(p.id); this.tryStartGame(); });
-            del.on('pointerdown', () => { LobbyManager.remove(p.id); });
-            this.listItems.push(row, name, status, toggle, del);
+            this.listItems.push(row, name, status);
         });
 
         // Update ready button text based on self ready
