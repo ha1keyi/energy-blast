@@ -1,0 +1,66 @@
+/* src/style.css */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #000;
+  overflow: hidden;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* 调试面板样式 */
+#debug-panel input[type="number"] {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+#debug-panel input[type="text"] {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 5px;
+  border-radius: 3px;
+}
+
+#debug-panel button {
+  background: #3498db;
+  border: none;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+#debug-panel button:hover {
+  background: #2980b9;
+}
+
+#debug-panel .remove-player {
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+}
+
+#game-logs div {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 0;
+}
+
+#game-logs div:last-child {
+  border-bottom: none;
+}
