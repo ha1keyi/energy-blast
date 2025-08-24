@@ -53,7 +53,7 @@ export class Player {
             actionConfig.energyCost,
             actionConfig.damage,
             actionConfig.reduction,
-            actionConfig.reflectDamage,
+            actionConfig.reboundDamage,
             actionConfig.name,
             actionConfig.description
         );

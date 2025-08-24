@@ -26,6 +26,10 @@ export class Game {
     }
 
     addPlayer(name) {
+        // Enforce unique player names in game
+        if (this.players.some(p => p.name === name)) {
+            throw new Error('玩家不能重名');
+        }
         const newId = this.players.length > 0 ? Math.max(...this.players.map(p => p.id)) + 1 : 1;
         const player = new Player(newId, name);
         this.players.push(player);

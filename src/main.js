@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { GameScene } from './scenes/GameScene.js';
 import { Game } from './core/Game.js';
+import { ACTIONS } from './core/constants/Actions.js';
+import { ActionType } from './core/enums/ActionType.js';
 import { DebugUIManager } from './managers/DebugUIManager.js';
 import { LobbyManager } from './managers/LobbyManager.js';
 import './style.css';
@@ -20,7 +22,6 @@ const config = {
   parent: 'game-canvas',
   transparent: true, // canvas sits under DOM UI
   backgroundColor: '#00000000', // fully transparent
-  scene: [GameScene],
   // Render crisp: match device resolution, disable smoothing
   resolution: DPR,
   render: { antialias: true, pixelArt: false, roundPixels: false },
@@ -30,6 +31,9 @@ const config = {
 };
 
 const phaserGame = new Phaser.Game(config);
+window.phaserGame = phaserGame;
+// Register GameScene but do not start automatically
+phaserGame.scene.add('GameScene', GameScene, false);
 console.log('Energy Blast initialized (hybrid UI + Phaser canvas)!');
 
 // Restore DOM-driven Home/Lobby over the canvas
@@ -40,6 +44,91 @@ const readyBtn = document.getElementById('ready-btn');
 const shareBtn = document.getElementById('share-link-btn');
 const playerListEl = document.getElementById('player-list');
 const lobbyStatusEl = document.getElementById('lobby-status');
+const actionBarEl = document.getElementById('action-bar');
+const targetOverlayEl = document.getElementById('target-overlay');
+
+let localPlayerId = 1; // assume host is player 1 in this demo
+
+// Map image filenames to resolved URLs via Vite asset pipeline
+const imageModules = import.meta.glob('./assets/images/*.jpg', { eager: true });
+const imageMap = {};
+for (const path in imageModules) {
+  const mod = imageModules[path];
+  const url = mod?.default || mod;
+  const name = path.split('/').pop();
+  imageMap[name] = url;
+}
+
+function showActionBar() {
+  if (!gameCore.isRunning || gameCore.gameState !== 'selecting') return hideActionBar();
+  const me = gameCore.players.find(p => p.id === localPlayerId);
+  if (!me || !me.isAlive) return hideActionBar();
+
+  actionBarEl.classList.remove('hidden');
+  targetOverlayEl.classList.add('hidden');
+
+  // Build buttons for: STORE_1, ATTACK_1, DEFEND_1, REBOUND_1, ATTACK_2 (if exists)
+  const keys = ['STORE_1', 'ATTACK_1', 'DEFEND_1', 'REBOUND_1', 'ATTACK_2'].filter(k => ACTIONS[k]);
+  actionBarEl.innerHTML = '';
+  keys.forEach(key => {
+    const cfg = ACTIONS[key];
+    let can = me.energy >= (cfg.energyCost || 0);
+    if (cfg.type === ActionType.ATTACK) {
+      const hasTarget = gameCore.players.some(p => p.id !== me.id && p.isAlive);
+      can = can && hasTarget;
+    }
+    const btn = document.createElement('button');
+    btn.className = 'action-btn' + (can ? '' : ' disabled');
+    const imgName = key.toLowerCase() + '.jpg';
+    const imgSrc = imageMap[imgName] || '';
+    btn.innerHTML = `<img alt="${cfg.name}" src="${imgSrc}"/><span>${cfg.name}</span>`;
+    if (can) {
+      btn.onclick = () => onChooseAction(me, key);
+    }
+    actionBarEl.appendChild(btn);
+  });
+}
+
+function hideActionBar() {
+  actionBarEl.classList.add('hidden');
+}
+
+function onChooseAction(player, actionKey) {
+  const cfg = ACTIONS[actionKey];
+  if (cfg.type === ActionType.ATTACK) {
+    // need target selection
+    renderTargetOverlay(player, actionKey);
+  } else {
+    try {
+      player.selectAction(actionKey, null);
+      debugUI.updatePlayerList();
+      showActionBar();
+    } catch (e) { alert(e.message); }
+  }
+}
+
+function renderTargetOverlay(player, actionKey) {
+  targetOverlayEl.innerHTML = '';
+  targetOverlayEl.classList.remove('hidden');
+
+  gameCore.players.forEach(p => {
+    if (p.id === player.id) return;
+    const card = document.createElement('div');
+    card.className = 'target-card' + (p.isAlive ? '' : ' dead');
+    card.textContent = p.name + (p.isAlive ? '' : ' (已死亡)');
+    if (p.isAlive) {
+      card.onclick = () => {
+        try {
+          player.selectAction(actionKey, p);
+          targetOverlayEl.classList.add('hidden');
+          debugUI.updatePlayerList();
+          showActionBar();
+        } catch (e) { alert(e.message); }
+      };
+    }
+    targetOverlayEl.appendChild(card);
+  });
+}
 
 function renderLobby() {
   playerListEl.innerHTML = '';
@@ -79,9 +168,25 @@ function startGame() {
   // Hide DOM UI; game runs on canvas
   document.getElementById('ui-container')?.classList.add('hidden');
   // Inject lobby players into core game and start
+  // Avoid duplicate players when starting via different paths
+  gameCore.players = [];
   LobbyManager.list().forEach(p => gameCore.addPlayer(p.name));
   gameCore.startGame();
+  // Start Phaser GameScene on demand
+  if (!phaserGame.scene.isActive('GameScene')) {
+    phaserGame.scene.start('GameScene');
+  }
+  // Show action bar when selecting
+  localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
+  const syncUI = () => {
+    if (gameCore.gameState === 'selecting') showActionBar(); else hideActionBar();
+  };
+  // Observe game state via polling simple interval (Dev)
+  setInterval(syncUI, 300);
 }
+
+// Expose for DebugUIManager interop
+window.startGameFromLobby = startGame;
 
 // Keep DOM lobby in sync with debug panel
 LobbyManager.subscribe(renderLobby);

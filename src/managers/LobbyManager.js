@@ -16,11 +16,17 @@ class LobbyManagerImpl {
     get(id) { return this.players.find(p => p.id === id); }
 
     add(name) {
+        // Prevent duplicate names
+        if (this.players.some(p => p.name === name)) {
+            return this.getByName(name);
+        }
         const p = { id: this.nextId++, name, ready: false };
         this.players.push(p);
         this._emit();
         return p;
     }
+
+    getByName(name) { return this.players.find(p => p.name === name); }
 
     remove(id) {
         this.players = this.players.filter(p => p.id !== id);

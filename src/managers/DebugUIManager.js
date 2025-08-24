@@ -98,7 +98,17 @@ export class DebugUIManager {
         // 游戏控制按钮
         document.getElementById('start-game').addEventListener('click', () => {
             try {
-                this.game.startGame();
+                if (window.lobby && window.lobby.players?.length) {
+                    if (window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
+                        window.startGameFromLobby();
+                    } else {
+                        alert('请在大厅中让所有玩家准备好再开始');
+                    }
+                } else {
+                    // No lobby in use; start with existing game players
+                    if (this.game.players.length < 2) throw new Error('至少需要2名玩家才能开始游戏');
+                    this.game.startGame();
+                }
                 this.updateGameState();
             } catch (error) {
                 alert(error.message);

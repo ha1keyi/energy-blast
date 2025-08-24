@@ -137,6 +137,80 @@ button:active {
   /* Let browser smooth; Phaser uses DPR for crispness */
 }
 
+/* In-game action bar */
+#action-bar {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  padding: 12px;
+  background: #fff;
+  border: 3px solid #222;
+  border-radius: 14px;
+  box-shadow: 6px 6px 0 #222;
+}
+
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 3px solid #222;
+  background: #fff;
+  color: #222;
+  border-radius: 10px;
+  box-shadow: 3px 3px 0 #222;
+  cursor: pointer;
+  width: 100px;
+}
+
+.action-btn.disabled {
+  opacity: 0.4;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
+
+.action-btn img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 2px solid #222;
+  border-radius: 8px;
+}
+
+.action-btn span {
+  font-size: 14px;
+}
+
+/* Target selection overlay */
+#target-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+
+.target-card {
+  background: #fff;
+  border: 3px solid #222;
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-shadow: 4px 4px 0 #222;
+  cursor: pointer;
+}
+
+.target-card.dead {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* 调试面板样式 */
 #debug-panel input[type="number"] {
   background: rgba(255, 255, 255, 0.1);

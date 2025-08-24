@@ -5,49 +5,22 @@ export class GameScene extends Phaser.Scene {
         super({ key: 'GameScene' });
     }
 
-    preload() {
-        // 这里预加载资源
-        this.load.setBaseURL('https://labs.phaser.io');
-        this.load.image('sky', 'assets/skies/space3.png');
-        this.load.image('logo', 'assets/sprites/phaser3-logo.png');
-    }
+    preload() { }
 
     create() {
-        // 创建背景
-        this.add.image(400, 300, 'sky');
-
-        // 添加logo测试
-        const logo = this.add.image(400, 150, 'logo');
-        logo.setScale(0.5);
-
-        // 添加文字说明
-        this.add.text(400, 400, 'Energy Blast', {
-            fontSize: '32px',
-            fill: '#fff',
-            align: 'center'
-        }).setOrigin(0.5);
+        // Hand-drawn black/white scene frame
+        const { width, height } = this.scale;
+        const g = this.add.graphics();
+        g.fillStyle(0xffffff, 0.9).fillRect(0, 0, width, height);
+        g.lineStyle(6, 0x000000, 1).strokeRect(6, 6, width - 12, height - 12);
+        // Title
+        this.add.text(Math.round(width / 2), 28, 'Energy Blast', {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '24px', color: '#000', stroke: '#fff', strokeThickness: 4
+        }).setOrigin(0.5, 0);
 
         console.log('GameScene created successfully!');
 
-        // 监听游戏结束，回到大厅
-        this.endWatcher = this.time.addEvent({
-            delay: 500, loop: true, callback: () => {
-                const core = window.game;
-                if (core?.gameState === 'ended') {
-                    this.scene.start('LobbyScene');
-                }
-            }
-        });
-
-        // 退出到主页按钮（可选）
-        const { width } = this.scale;
-        const quit = this.add.text(width - 120, 20, '退出到主页', { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#fff' })
-            .setInteractive({ useHandCursor: true });
-        quit.on('pointerdown', () => {
-            const core = window.game;
-            core?.endGame();
-            this.scene.start('HomeScene');
-        });
+        // In hybrid mode, DOM (lobby/home) controls navigation; GameScene stays focused on gameplay.
     }
 
     update() {
