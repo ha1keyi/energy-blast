@@ -45,9 +45,9 @@ const shareBtn = document.getElementById('share-link-btn');
 const playerListEl = document.getElementById('player-list');
 const lobbyStatusEl = document.getElementById('lobby-status');
 const actionBarEl = document.getElementById('action-bar');
-const targetOverlayEl = document.getElementById('target-overlay');
 
 let localPlayerId = 1; // assume host is player 1 in this demo
+let gameSyncIntervalId = null;
 
 // Map image filenames to resolved URLs via Vite asset pipeline
 const imageModules = import.meta.glob('./assets/images/*.jpg', { eager: true });
@@ -65,7 +65,7 @@ function showActionBar() {
   if (!me || !me.isAlive) return hideActionBar();
 
   actionBarEl.classList.remove('hidden');
-  targetOverlayEl.classList.add('hidden');
+  // no target overlay; direct click on opponents in canvas
 
   // Build buttons for: STORE_1, ATTACK_1, DEFEND_1, REBOUND_1, ATTACK_2 (if exists)
   const keys = ['STORE_1', 'ATTACK_1', 'DEFEND_1', 'REBOUND_1', 'ATTACK_2'].filter(k => ACTIONS[k]);
@@ -96,8 +96,8 @@ function hideActionBar() {
 function onChooseAction(player, actionKey) {
   const cfg = ACTIONS[actionKey];
   if (cfg.type === ActionType.ATTACK) {
-    // need target selection
-    renderTargetOverlay(player, actionKey);
+    // Enter direct target selection mode; GameScene will handle clicks on opponents
+    window.pendingAttack = { selfId: player.id, actionKey };
   } else {
     try {
       player.selectAction(actionKey, null);
@@ -105,29 +105,6 @@ function onChooseAction(player, actionKey) {
       showActionBar();
     } catch (e) { alert(e.message); }
   }
-}
-
-function renderTargetOverlay(player, actionKey) {
-  targetOverlayEl.innerHTML = '';
-  targetOverlayEl.classList.remove('hidden');
-
-  gameCore.players.forEach(p => {
-    if (p.id === player.id) return;
-    const card = document.createElement('div');
-    card.className = 'target-card' + (p.isAlive ? '' : ' dead');
-    card.textContent = p.name + (p.isAlive ? '' : ' (已死亡)');
-    if (p.isAlive) {
-      card.onclick = () => {
-        try {
-          player.selectAction(actionKey, p);
-          targetOverlayEl.classList.add('hidden');
-          debugUI.updatePlayerList();
-          showActionBar();
-        } catch (e) { alert(e.message); }
-      };
-    }
-    targetOverlayEl.appendChild(card);
-  });
 }
 
 function renderLobby() {
@@ -178,11 +155,30 @@ function startGame() {
   }
   // Show action bar when selecting
   localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
+  window.localPlayerId = localPlayerId;
   const syncUI = () => {
-    if (gameCore.gameState === 'selecting') showActionBar(); else hideActionBar();
+    if (gameCore.gameState === 'selecting') {
+      showActionBar();
+    } else {
+      hideActionBar();
+    }
+    // Game over -> return to lobby UI
+    if (gameCore.gameState === 'ended') {
+      window.pendingAttack = null;
+      document.getElementById('ui-container')?.classList.remove('hidden');
+      homeScreen?.classList.add('hidden');
+      lobbyScreen?.classList.remove('hidden');
+      // Update lobby status
+      if (lobbyStatusEl) lobbyStatusEl.textContent = '游戏结束，等待所有玩家准备…';
+      // Stop scene
+      if (phaserGame.scene.isActive('GameScene')) phaserGame.scene.stop('GameScene');
+      // stop polling
+      if (gameSyncIntervalId) { clearInterval(gameSyncIntervalId); gameSyncIntervalId = null; }
+    }
   };
   // Observe game state via polling simple interval (Dev)
-  setInterval(syncUI, 300);
+  if (gameSyncIntervalId) clearInterval(gameSyncIntervalId);
+  gameSyncIntervalId = setInterval(syncUI, 300);
 }
 
 // Expose for DebugUIManager interop

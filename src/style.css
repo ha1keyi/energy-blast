@@ -144,7 +144,7 @@ button:active {
   right: 20px;
   bottom: 20px;
   display: flex;
-  gap: 12px;
+  gap: 14px;
   justify-content: center;
   align-items: center;
   padding: 12px;
@@ -187,29 +187,7 @@ button:active {
   font-size: 14px;
 }
 
-/* Target selection overlay */
-#target-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-}
-
-.target-card {
-  background: #fff;
-  border: 3px solid #222;
-  border-radius: 12px;
-  padding: 10px 14px;
-  box-shadow: 4px 4px 0 #222;
-  cursor: pointer;
-}
-
-.target-card.dead {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
+/* target overlay removed; direct click in canvas */
 
 /* 调试面板样式 */
 #debug-panel input[type="number"] {
