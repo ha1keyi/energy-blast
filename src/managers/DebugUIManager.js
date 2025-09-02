@@ -5,7 +5,8 @@ export class DebugUIManager {
         this.game = game;
         this.debugPanel = null;
         this.isAutoResolve = false; // 默认不自动解析
-        this._pendingSelections = new Map(); // 新增：未设定的临时选择缓冲
+        // 新增：用于暂存玩家在下拉框中的临时选择，避免刷新覆盖
+        this._pendingSelections = new Map();
         this.setupDebugUI();
     }
 
@@ -16,7 +17,8 @@ export class DebugUIManager {
         this.updatePlayerList();
         // 新增：初始化时同步一次游戏状态
         this.updateGameState();
-        // 新增：订阅 Lobby 变化 -> 及时刷新大厅区
+
+        // 新增：订阅 LobbyManager 的变化，实时刷新 DebugUI 的大厅列表
         if (window.lobby && typeof window.lobby.subscribe === 'function') {
             window.lobby.subscribe(() => this.updateLobbyList());
         }
@@ -92,6 +94,7 @@ export class DebugUIManager {
                     clearTimeout(this.game.timer);
                     this.game.timer = null;
                 }
+                // 若开启自动结算且当前在选择阶段、没有定时器，则补上定时器
                 if (this.isAutoResolve && this.game.isRunning && this.game.gameState === 'selecting' && !this.game.timer) {
                     this.game.timer = setTimeout(async () => {
                         await this.game.processRound();
@@ -149,7 +152,7 @@ export class DebugUIManager {
                 (window.showToast || alert)('请先关闭自动结算');
                 return;
             }
-            // 修复：手动结算用完整流程
+            // 修复：手动结算应执行完整流程
             if (typeof this.game.processRound === 'function') {
                 this.game.processRound();
             }
@@ -184,7 +187,7 @@ export class DebugUIManager {
                 try {
                     player.selectAction(actionKey, targetPlayer);
                     // 设定成功后清除该玩家的 pending 缓冲
-                    this._pendingSelections.delete(player.id);
+                    (this._pendingSelections || (this._pendingSelections = new Map())).delete(player.id);
                     console.log(`${player.name} set action to ${actionKey} targeting ${targetPlayer ? targetPlayer.name : 'none'}`);
                     this.updatePlayerList(); // 只在设定后刷新
                 } catch (error) {
@@ -202,6 +205,7 @@ export class DebugUIManager {
             const index = parseInt(playerCard.dataset.index);
             const player = this.game.players[index];
 
+            // 修改生命值
             if (e.target.classList.contains('health-input')) {
                 const health = parseInt(e.target.value);
                 player.health = health;
@@ -210,6 +214,7 @@ export class DebugUIManager {
                 return;
             }
 
+            // 修改气量
             if (e.target.classList.contains('energy-input')) {
                 const energy = parseInt(e.target.value);
                 player.energy = energy;
@@ -217,14 +222,15 @@ export class DebugUIManager {
                 return;
             }
 
-            // 新增：行动/目标下拉改变时只缓存在 pending，不提交，避免刷新覆盖
+            // 新增：当行动或目标下拉选择变化时，不立刻提交，只记录到 pending 中，防止刷新覆盖
             if (e.target.classList.contains('action-select') || e.target.classList.contains('target-select')) {
                 const card = e.target.closest('.player-card');
                 const actionSel = card.querySelector('.action-select');
                 const targetSel = card.querySelector('.target-select');
                 const actionKey = actionSel?.value || '';
                 const targetId = targetSel?.value ? parseInt(targetSel.value) : null;
-                this._pendingSelections.set(player.id, { actionKey, targetId });
+                (this._pendingSelections || (this._pendingSelections = new Map())).set(player.id, { actionKey, targetId });
+                // 不触发 updatePlayerList，避免重建 DOM 导致视觉闪动
                 return;
             }
         });
@@ -323,7 +329,16 @@ export class DebugUIManager {
 
             const logsEl = document.getElementById('game-logs');
             if (logsEl) {
-                logsEl.innerHTML = state.logs.map(l => `<div>[${l.round}] ${l.message}</div>`).join('');
+                const logs = Array.isArray(state.logs) ? state.logs : [];
+                logsEl.innerHTML = logs.map(l => {
+                    if (typeof l === 'string') {
+                        return `<div>${l}</div>`;
+                    }
+                    const msg = l && typeof l.message !== 'undefined' ? l.message : '';
+                    const rd = l && typeof l.round !== 'undefined' ? l.round : '';
+                    const prefix = rd !== '' ? `[${rd}] ` : '';
+                    return `<div>${prefix}${msg}</div>`;
+                }).join('');
                 logsEl.scrollTop = logsEl.scrollHeight;
             }
         } catch (e) {
@@ -335,15 +350,21 @@ export class DebugUIManager {
         const playerListContainer = document.getElementById('debug-player-list');
         if (!playerListContainer) return;
 
+        // 防御：确保 _pendingSelections 存在
+        if (!this._pendingSelections) this._pendingSelections = new Map();
+
         const players = this.game.players || [];
         playerListContainer.innerHTML = players.map((player, index) => {
             const isVirtual = player.name.includes('虚拟');
             const otherPlayers = players.filter(p => p.id !== player.id);
 
-            const pending = this._pendingSelections.get(player.id) || null;
+            // 新增：从 pendingSelections 读取临时选择，优先使用（加固防御）
+            const pendingMap = (this._pendingSelections && this._pendingSelections instanceof Map) ? this._pendingSelections : null;
+            const pending = pendingMap ? pendingMap.get(player.id) : null;
             const pendingActionKey = pending?.actionKey ?? null;
             const pendingTargetId = pending?.targetId ?? null;
 
+            // 生成动作下拉选项（优先 pending，其次 currentAction）
             let actionOptions = '<option value="" ' + (!pendingActionKey && !player.currentAction ? 'selected' : '') + '>无</option>';
             actionOptions += ACTION_KEYS.map((key) => {
                 const cfg = ACTIONS[key];
@@ -407,7 +428,7 @@ export class DebugUIManager {
         this._updateTimer = setInterval(() => {
             try {
                 this.updateGameState();
-                // this.updatePlayerList(); // 仍保持不定时刷新玩家下拉，防止覆盖
+                // this.updatePlayerList(); // 移除定时刷新玩家列表，避免覆盖未设定的选择
                 this.updateLobbyList();
             } catch (e) {
                 console.warn('DebugUI auto update error:', e);

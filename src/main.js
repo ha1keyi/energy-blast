@@ -268,8 +268,31 @@ readyBtn?.addEventListener('click', () => {
 });
 
 shareBtn?.addEventListener('click', () => {
-  const url = `${location.origin}?room=${LobbyManager.roomId}`;
-  navigator.clipboard.writeText(url).then(() => showToast('邀请链接已复制')).catch(() => showToast('复制失败，请手动复制地址栏链接'));
+  let origin = location.origin;
+  // If connected to a remote server, construct the share URL based on the server's hostname.
+  // This helps when accessing via localhost on the host machine but connecting to a LAN IP.
+  if (LobbyManager.socket && LobbyManager.connected) {
+    try {
+      const socketUrl = new URL(LobbyManager.socket.io.uri);
+      // Use the socket's hostname if it's a proper network IP
+      if (socketUrl.hostname !== 'localhost' && socketUrl.hostname !== '127.0.0.1') {
+        // Reconstruct origin with the socket's hostname and the frontend's port
+        origin = `${location.protocol}//${socketUrl.hostname}:${location.port}`;
+      }
+    } catch (e) {
+      console.error("Could not parse socket URL for sharing:", e);
+    }
+  }
+  const url = `${origin}?room=${LobbyManager.roomId}`;
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('邀请链接已复制'))
+      .catch(() => showToast('复制失败，请手动复制地址栏链接'));
+  } else {
+    // Fallback for insecure contexts or older browsers
+    window.prompt('请手动复制此链接:', url);
+  }
 });
 
 function startGame() {

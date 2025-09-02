@@ -36,10 +36,13 @@
       </div>
 
       <!-- 名字输入弹窗（替代浏览器 prompt） -->
-      <div id="name-modal" class="interactive hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; align-items: center; justify-content: center;">
-        <div style="background:#fff; color:#333; padding:16px; border-radius:8px; width: 300px; box-shadow: 0 6px 24px rgba(0,0,0,.25);">
+      <div id="name-modal" class="interactive hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; align-items: center; justify-content: center;">
+        <div
+          style="background:#fff; color:#333; padding:16px; border-radius:8px; width: 300px; box-shadow: 0 6px 24px rgba(0,0,0,.25);">
           <h3 style="margin: 0 0 10px 0; font-size: 18px;">请输入名字</h3>
-          <input id="player-name-input" type="text" placeholder="你的名字" style="width:100%; padding:8px 10px; margin-bottom:12px; border:1px solid #ddd; border-radius:6px; outline:none;">
+          <input id="player-name-input" type="text" placeholder="你的名字"
+            style="width:100%; padding:8px 10px; margin-bottom:12px; border:1px solid #ddd; border-radius:6px; outline:none;">
           <div style="display:flex; justify-content:flex-end; gap:8px;">
             <button id="name-cancel-btn" class="interactive" style="background:#eee; color:#333;">取消</button>
             <button id="name-confirm-btn" class="interactive" style="background:#27ae60;">确定</button>
@@ -48,8 +51,10 @@
       </div>
 
       <!-- 全局确认弹窗（替代 confirm） -->
-      <div id="confirm-modal" class="interactive hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; align-items: center; justify-content: center;">
-        <div style="background:#fff; color:#333; padding:16px; border-radius:8px; width: 320px; box-shadow: 0 6px 24px rgba(0,0,0,.25);">
+      <div id="confirm-modal" class="interactive hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; align-items: center; justify-content: center;">
+        <div
+          style="background:#fff; color:#333; padding:16px; border-radius:8px; width: 320px; box-shadow: 0 6px 24px rgba(0,0,0,.25);">
           <div id="confirm-message" style="margin: 0 0 16px 0; font-size: 16px; line-height:1.4;"></div>
           <div style="display:flex; justify-content:flex-end; gap:8px;">
             <button id="confirm-cancel-btn" class="interactive" style="background:#eee; color:#333;">取消</button>
@@ -59,7 +64,9 @@
       </div>
 
       <!-- 轻提示（替代 alert） -->
-      <div id="toast" class="hidden" style="position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.85); color: #fff; padding: 10px 14px; border-radius: 20px; z-index: 1000; font-size: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.25);"></div>
+      <div id="toast" class="hidden"
+        style="position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.85); color: #fff; padding: 10px 14px; border-radius: 20px; z-index: 1000; font-size: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.25);">
+      </div>
 
       <!-- In-game Action Bar (visible during gameplay) -->
       <div id="action-bar" class="interactive hidden"></div>

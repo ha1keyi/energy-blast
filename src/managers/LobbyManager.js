@@ -13,7 +13,8 @@ class LobbyManagerImpl {
     this.roomId = null;
     this.socket = null;
     this.playerId = null;
-    this.connected = false; // 新增：连接状态
+    this.connected = false;
+    this._pendingAction = null; // Action to run upon connection
   }
 
   connect() {
@@ -32,14 +33,24 @@ class LobbyManagerImpl {
       console.log('Connected to server with id', this.socket.id);
       this.playerId = this.socket.id;
       this.connected = true; // 标记为已连接
+
+      // Execute any pending action
+      if (this._pendingAction) {
+        this._pendingAction();
+        this._pendingAction = null;
+      }
+      this._emit();
     });
 
     // 新增：断线/连错处理
     this.socket.on('disconnect', () => {
       this.connected = false;
+      this._emit();
     });
-    this.socket.on('connect_error', () => {
+    this.socket.on('connect_error', (err) => {
+      console.error('Connection Error:', err);
       this.connected = false;
+      this._emit();
     });
 
     this.socket.on('roomState', (roomState) => {
@@ -154,58 +165,51 @@ class LobbyManagerImpl {
     this._emit();
   }
 
-  joinRoom(roomId, name) {
-    this.roomId = roomId;
-    this.socket.emit('joinRoom', { roomId, name });
-    // 乐观更新：把自己先加入本地列表以便立即显示
-    if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
-      this.serverPlayers = [...this.serverPlayers, { id: this.playerId, name, ready: false }];
-      this._emit();
-    }
-  }
-
   createRoom(name) {
-    // 新增：离线/未连时的本地回退与乐观更新
-    if (!this.socket || !this.connected) {
-      if (!this.playerId) this.playerId = `local-${Math.random().toString(36).slice(2, 8)}`;
-      if (!this.roomId) this.roomId = `local-${Date.now()}`;
-      if (!this.serverPlayers.some(p => p.id === this.playerId)) {
-        this.serverPlayers = [{ id: this.playerId, name, ready: false }];
+    const action = () => {
+      this.socket.emit('createRoom', { name });
+      // Optimistic update: add self to list immediately
+      if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
+        this.serverPlayers.push({ id: this.playerId, name, ready: false });
+        this._emit();
       }
-      this._emit();
-      return;
-    }
+    };
 
-    this.socket.emit('createRoom', { name });
-    // 乐观：把自己先放入列表，等服务器 roomState 覆盖
-    if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
-      this.serverPlayers.push({ id: this.playerId, name, ready: false });
-      this._emit();
+    if (this.connected) {
+      action();
+    } else {
+      this._pendingAction = action;
+      if (!this.socket) {
+        this.connect();
+      }
     }
   }
 
   joinRoom(roomId, name) {
-    this.roomId = roomId;
-    // 离线/未连：本地加入
-    if (!this.socket || !this.connected) {
-      if (!this.playerId) this.playerId = `local-${Math.random().toString(36).slice(2, 8)}`;
-      if (!this.serverPlayers.some(p => p.id === this.playerId)) {
+    const action = () => {
+      this.socket.emit('joinRoom', { roomId, name });
+      // Optimistic update: add self to list immediately
+      if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
         this.serverPlayers.push({ id: this.playerId, name, ready: false });
+        this._emit();
       }
-      this._emit();
-      return;
-    }
-    this.socket.emit('joinRoom', { roomId, name });
-    // 乐观：把自己先放入列表
-    if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
-      this.serverPlayers.push({ id: this.playerId, name, ready: false });
-      this._emit();
+    };
+
+    if (this.connected) {
+      action();
+    } else {
+      this.roomId = roomId; // Remember which room to join
+      this._pendingAction = action;
+      if (!this.socket) {
+        this.connect();
+      }
     }
   }
 
   toggleReady() {
-    // 离线/未连：本地切换自己的 ready
     if (!this.socket || !this.connected) {
+      console.warn('Cannot toggle ready: not connected.');
+      // For local testing, we can allow toggling ready status
       const meIdx = this.serverPlayers.findIndex(p => p.id === this.playerId);
       if (meIdx >= 0) {
         this.serverPlayers[meIdx] = { ...this.serverPlayers[meIdx], ready: !this.serverPlayers[meIdx].ready };

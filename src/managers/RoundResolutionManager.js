@@ -8,6 +8,8 @@ export class RoundResolutionManager {
         this.container = null;
         this.sprites = [];
         this.labels = [];
+        this.overlay = null;
+        this._continueResolver = null;
     }
 
     clear() {
@@ -111,5 +113,78 @@ export class RoundResolutionManager {
         const level = action.level || 1;
         const key = `${base}_${level}.jpg`;
         return key;
+    }
+
+    async showRoundResult(report, { auto = true, autoDelay = 1200 } = {}) {
+        this._destroyOverlay();
+
+        const { width, height } = this.scene.scale;
+        this.overlay = this.scene.add.container(0, 0).setDepth(50);
+
+        // 半透明遮罩
+        const mask = this.scene.add.rectangle(0, 0, width, height, 0x000000, 0.35).setOrigin(0, 0);
+        // 面板
+        const panelW = Math.min(680, Math.round(width * 0.8));
+        const panelH = Math.min(380, Math.round(height * 0.7));
+        const px = (width - panelW) / 2;
+        const py = (height - panelH) / 2;
+        const panel = this.scene.add.rectangle(px, py, panelW, panelH, 0xffffff, 0.98).setOrigin(0, 0).setStrokeStyle(4, 0x000000);
+
+        const title = this.scene.add.text(px + 16, py + 10, `第 ${report.round} 轮 · 结算结果`, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000'
+        }).setOrigin(0, 0);
+
+        const header = this.scene.add.text(px + 16, py + 40, '玩家 / 动作 / 目标 / 造成 / 承受 / 减免 / 反弹 / 气量(前→后) / 生命(前→后) / KO', {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000'
+        }).setOrigin(0, 0);
+
+        const lines = [];
+        let y = py + 64;
+        const lineH = 20;
+        report.entries.forEach(e => {
+            const line = this.scene.add.text(px + 16, y,
+                `${e.name} / ${e.action || '-'} / ${e.targetName || '-'} / ${e.damageDealt} / ${e.damageTaken} / ${e.reduced} / ${e.reboundDealt} / ${e.energyBefore}→${e.energyAfter} / ${e.healthBefore}→${e.healthAfter} / ${e.ko ? '✓' : '-'}`,
+                { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000' }
+            ).setOrigin(0, 0);
+            lines.push(line);
+            y += lineH;
+        });
+
+        const btn = this.scene.add.text(px + panelW - 90, py + panelH - 36, '继续 ▶', {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#fff', backgroundColor: '#2ecc71', padding: { left: 10, right: 10, top: 6, bottom: 6 }
+        }).setOrigin(0, 0).setInteractive({ cursor: 'pointer' });
+        btn.on('pointerdown', () => this._resolveAndHide());
+
+        this.overlay.add([mask, panel, title, header, ...lines, btn]);
+
+        this.overlay.setAlpha(0);
+        this.scene.tweens.add({ targets: this.overlay, alpha: 1, duration: 160, ease: 'Quad.easeOut' });
+
+        if (auto) {
+            return new Promise(resolve => {
+                this._continueResolver = resolve;
+                this.scene.time.delayedCall(autoDelay, () => this._resolveAndHide(), [], this);
+            });
+        } else {
+            return new Promise(resolve => { this._continueResolver = resolve; });
+        }
+    }
+
+    _resolveAndHide() {
+        this._destroyOverlay();
+        // 结束结算画面后，也清理结算阶段的图标与标签
+        this.onResolvingEnd();
+        if (this._continueResolver) {
+            const r = this._continueResolver;
+            this._continueResolver = null;
+            r();
+        }
+    }
+
+    _destroyOverlay() {
+        if (this.overlay) {
+            this.overlay.destroy(true);
+            this.overlay = null;
+        }
     }
 }

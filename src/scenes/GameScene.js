@@ -2,6 +2,7 @@
 import Phaser from 'phaser';
 import { GameClient } from '../core/GameClient.js';
 import { LobbyManager } from '../managers/LobbyManager.js';
+import { GameStateStore } from '../core/GameStateStore.js';
 
 // Resolve action images via Vite eager glob
 const actionImages = import.meta.glob('../assets/images/*.jpg', { eager: true });
@@ -81,13 +82,13 @@ export class GameScene extends Phaser.Scene {
         this.battleLogContainer = this.add.container(0, 0).setDepth(25);
         this._lastLogCount = 0;
 
-        // Poll to refresh HUD and show chosen actions on resolve
+        // 去重：仅保留一个定时器轮询 HUD / 日志 / 待选提示
         this.time.addEvent({
             delay: 300,
             loop: true,
             callback: () => {
                 this.updateHUD();
-                // 由 RoundResolutionManager 统一管理结算期动作图标与文本
+                // 动作图标+文本由 RoundResolutionManager 管理
                 this.updateBattleLogPanel();
                 this.updatePendingHint();
             }
@@ -262,7 +263,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     updateActionSprites() {
-        // 统一交给 RoundResolutionManager 管理；此处避免重复渲染
+        // 已交由 RoundResolutionManager 统一管理；避免重复渲染
         if (this.roundResolutionManager) return;
 
         const core = this.getCore();
