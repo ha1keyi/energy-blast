@@ -7,6 +7,15 @@ import { DebugUIManager } from './managers/DebugUIManager.js';
 import { LobbyManager } from './managers/LobbyManager.js';
 import './style.css';
 
+// 早期 UI 助手垫片，防止在完整初始化前调用到不受支持的 alert/confirm
+if (typeof window !== 'undefined') {
+  if (!window.showToast) window.showToast = (msg) => console.warn('[toast]', msg);
+  if (!window.showConfirm) window.showConfirm = (msg) => Promise.resolve(false);
+}
+
+// Connect to the server
+LobbyManager.connect();
+
 // Core game instance shared across scenes
 const gameCore = new Game();
 const debugUI = new DebugUIManager(gameCore);
@@ -46,6 +55,78 @@ const playerListEl = document.getElementById('player-list');
 const lobbyStatusEl = document.getElementById('lobby-status');
 const actionBarEl = document.getElementById('action-bar');
 
+// 动态添加“添加虚拟玩家”按钮
+(function ensureAddBotButton() {
+  const actions = lobbyScreen?.querySelector('.lobby-actions');
+  if (!actions) return;
+  let addBotBtn = document.getElementById('add-bot-btn');
+  if (!addBotBtn) {
+    addBotBtn = document.createElement('button');
+    addBotBtn.id = 'add-bot-btn';
+    addBotBtn.className = 'interactive';
+    addBotBtn.textContent = '添加虚拟玩家';
+    actions.appendChild(addBotBtn);
+  }
+  const refreshBtn = () => {
+    // 只有房主可以添加虚拟玩家
+    const enable = LobbyManager.isHost && LobbyManager.isHost();
+    addBotBtn.toggleAttribute('disabled', !enable);
+  };
+  addBotBtn.onclick = () => {
+    if (!(LobbyManager.isHost && LobbyManager.isHost())) {
+      (window.showToast || alert)('只有房主可以添加虚拟玩家');
+      return;
+    }
+    const n = `虚拟玩家${Math.floor(Math.random() * 1000)}`;
+    LobbyManager.addBot(n); // 本地只加到 Lobby，不发到服务器
+    renderLobby();
+  };
+  // 动态根据房主状态更新
+  LobbyManager.subscribe(refreshBtn);
+  refreshBtn();
+})();
+
+// 名字输入弹窗元素
+const nameModal = document.getElementById('name-modal');
+const nameInput = document.getElementById('player-name-input');
+const nameConfirmBtn = document.getElementById('name-confirm-btn');
+const nameCancelBtn = document.getElementById('name-cancel-btn');
+
+function openNameModal(defaultName = `玩家${Math.floor(Math.random() * 100)}`, onConfirm, onCancel) {
+  if (!nameModal || !nameInput || !nameConfirmBtn || !nameCancelBtn) {
+    console.warn('Name modal elements missing');
+    onConfirm?.(defaultName);
+    return;
+  }
+  nameInput.value = defaultName;
+  nameModal.classList.remove('hidden');
+  nameModal.style.display = 'flex';
+
+  const cleanup = () => {
+    nameModal.classList.add('hidden');
+    nameModal.style.display = '';
+    nameConfirmBtn.onclick = null;
+    nameCancelBtn.onclick = null;
+    nameInput.onkeydown = null;
+  };
+
+  nameConfirmBtn.onclick = () => {
+    const val = (nameInput.value || '').trim() || defaultName;
+    cleanup();
+    onConfirm?.(val);
+  };
+  nameCancelBtn.onclick = () => {
+    cleanup();
+    onCancel?.();
+  };
+  nameInput.onkeydown = (e) => {
+    if (e.key === 'Enter') nameConfirmBtn.click();
+    if (e.key === 'Escape') nameCancelBtn.click();
+  };
+
+  // 聚焦输入框
+  setTimeout(() => { nameInput.focus(); nameInput.select(); }, 0);
+}
 let localPlayerId = 1; // assume host is player 1 in this demo
 let gameSyncIntervalId = null;
 
@@ -93,17 +174,55 @@ function hideActionBar() {
   actionBarEl.classList.add('hidden');
 }
 
+// Toast & Confirm helpers
+function showToast(message, duration = 1600) {
+  const el = document.getElementById('toast');
+  if (!el) { console.warn('[toast]', message); return; }
+  el.textContent = message;
+  el.classList.remove('hidden');
+  el.style.opacity = '0';
+  el.style.transition = 'opacity .2s ease';
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => el.classList.add('hidden'), 220);
+  }, duration);
+}
+
+function showConfirm(message) {
+  const modal = document.getElementById('confirm-modal');
+  const msg = document.getElementById('confirm-message');
+  const ok = document.getElementById('confirm-ok-btn');
+  const cancel = document.getElementById('confirm-cancel-btn');
+  if (!modal || !msg || !ok || !cancel) return Promise.resolve(false);
+  modal.classList.remove('hidden');
+  modal.style.display = 'flex';
+  msg.textContent = message;
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      modal.style.display = '';
+      ok.onclick = null; cancel.onclick = null;
+    };
+    ok.onclick = () => { cleanup(); resolve(true); };
+    cancel.onclick = () => { cleanup(); resolve(false); };
+  });
+}
+// 将助手暴露到全局，供 DebugUIManager 等模块调用
+window.showToast = showToast;
+window.showConfirm = showConfirm;
+
 function onChooseAction(player, actionKey) {
   const cfg = ACTIONS[actionKey];
   if (cfg.type === ActionType.ATTACK) {
-    // Enter direct target selection mode; GameScene will handle clicks on opponents
     window.pendingAttack = { selfId: player.id, actionKey };
   } else {
+    LobbyManager.socket.emit('selectAction', LobbyManager.roomId, actionKey, null);
     try {
       player.selectAction(actionKey, null);
       debugUI.updatePlayerList();
       showActionBar();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showToast(e.message); }
   }
 }
 
@@ -111,33 +230,46 @@ function renderLobby() {
   playerListEl.innerHTML = '';
   LobbyManager.list().forEach(p => {
     const li = document.createElement('li');
-    li.innerHTML = `<span>${p.name}</span><span class="player-status ${p.ready ? 'ready' : ''}">${p.ready ? '已准备' : '未准备'}</span>`;
+    li.innerHTML = `<span>${p.name}${p.isBot ? ' (虚拟)' : ''}</span><span class="player-status ${p.ready ? 'ready' : ''}">${p.ready ? '已准备' : '未准备'}</span>`;
     playerListEl.appendChild(li);
   });
+  // 根据是否已加入/创建房间控制按钮可用性
+  shareBtn?.toggleAttribute('disabled', !LobbyManager.roomId);
+  readyBtn?.toggleAttribute('disabled', !LobbyManager.roomId);
+  const self = LobbyManager.getSelf?.();
+  if (self && readyBtn) {
+    readyBtn.textContent = self.ready ? '取消准备' : '准备';
+    readyBtn.style.borderColor = self.ready ? '#2ecc71' : '#222';
+  }
+
   const allReady = LobbyManager.allReady();
   lobbyStatusEl.textContent = allReady ? '所有玩家已准备！即将开始...' : '等待所有玩家准备...';
   if (allReady) setTimeout(startGame, 600);
 }
 
 startBtn?.addEventListener('click', () => {
-  homeScreen.classList.add('hidden');
-  lobbyScreen.classList.remove('hidden');
-  LobbyManager.reset();
-  LobbyManager.add('玩家1 (你)');
-  setTimeout(() => { LobbyManager.add('玩家2'); renderLobby(); }, 300);
-  renderLobby();
+  // 仅在确认名字后才进入房间页
+  openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => {
+    LobbyManager.createRoom(playerName);
+    homeScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('hidden');
+  }, () => {
+    // 取消则留在首页
+  });
 });
 
 readyBtn?.addEventListener('click', () => {
-  const self = LobbyManager.get(1) || LobbyManager.add('玩家1 (你)');
-  LobbyManager.toggleReady(self.id);
-  readyBtn.textContent = self.ready ? '取消准备' : '准备';
-  readyBtn.style.borderColor = self.ready ? '#2ecc71' : '#222';
-  renderLobby();
+  LobbyManager.toggleReady();
+  const self = LobbyManager.getSelf();
+  if (self) {
+    readyBtn.textContent = self.ready ? '取消准备' : '准备';
+    readyBtn.style.borderColor = self.ready ? '#2ecc71' : '#222';
+  }
 });
 
 shareBtn?.addEventListener('click', () => {
-  navigator.clipboard.writeText(location.href).then(() => alert('邀请链接已复制')).catch(() => alert('复制失败，请手动复制地址栏链接'));
+  const url = `${location.origin}?room=${LobbyManager.roomId}`;
+  navigator.clipboard.writeText(url).then(() => showToast('邀请链接已复制')).catch(() => showToast('复制失败，请手动复制地址栏链接'));
 });
 
 function startGame() {
@@ -147,14 +279,21 @@ function startGame() {
   // Inject lobby players into core game and start
   // Avoid duplicate players when starting via different paths
   gameCore.players = [];
-  LobbyManager.list().forEach(p => gameCore.addPlayer(p.name));
+  LobbyManager.list().forEach(p => gameCore.addPlayer(p.name, { isBot: !!p.isBot }));
   gameCore.startGame();
   // Start Phaser GameScene on demand
   if (!phaserGame.scene.isActive('GameScene')) {
     phaserGame.scene.start('GameScene');
   }
   // Show action bar when selecting
-  localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
+  // Determine local player by matching lobby self name to core players to avoid wrong self-id
+  const selfLobby = (LobbyManager.getSelf && LobbyManager.getSelf()) || null;
+  if (selfLobby) {
+    const me = gameCore.players.find(p => p.name === selfLobby.name);
+    localPlayerId = (me && me.id) || (gameCore.players[0] && gameCore.players[0].id) || 1;
+  } else {
+    localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
+  }
   window.localPlayerId = localPlayerId;
   const syncUI = () => {
     if (gameCore.gameState === 'selecting') {
@@ -187,3 +326,17 @@ window.startGameFromLobby = startGame;
 // Keep DOM lobby in sync with debug panel
 LobbyManager.subscribe(renderLobby);
 window.renderLobby = renderLobby;
+renderLobby();
+
+// Check for a room ID in the URL
+const urlParams = new URLSearchParams(window.location.search);
+const roomId = urlParams.get('room');
+if (roomId) {
+  openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => {
+    LobbyManager.joinRoom(roomId, playerName);
+    homeScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('hidden');
+  }, () => {
+    // 取消加入，保持在首页
+  });
+}

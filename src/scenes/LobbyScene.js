@@ -5,6 +5,8 @@ import { Game } from '../core/Game.js';
 export class LobbyScene extends Phaser.Scene {
     constructor() { super('LobbyScene'); }
 
+    // 集成socket到LobbyScene
+    // 修改create方法以处理在线房间
     create() {
         const { width, height } = this.scale;
 
@@ -83,7 +85,9 @@ export class LobbyScene extends Phaser.Scene {
         }
     }
 
+    // 修改refresh以从socket更新
     refresh() {
+        // 使用LobbyManager.players
         // Clear existing list items
         this.listItems.forEach(it => it.destroy());
         this.listItems = [];

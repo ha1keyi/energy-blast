@@ -13,6 +13,14 @@ export class Player {
         this.target = null;
         this.isAlive = true;
         this.score = 0;
+        // 预留：虚拟玩家与AI控制支持
+        this.isBot = false;
+        this.controller = null; // 可选：用于未来AI控制的控制器对象
+    }
+
+    // 设置AI控制器（可选）
+    setController(controller) {
+        this.controller = controller || null;
     }
 
     // 获取当前可用的操作列表
@@ -70,44 +78,58 @@ export class Player {
 
     // 执行操作后的气量调整
     adjustEnergy() {
-        if (this.currentAction && this.currentAction.type === 'STORE') {
-            this.energy += this.currentAction.getEnergyGain();
-        } else if (this.currentAction) {
+        if (this.currentAction) {
             this.energy -= this.currentAction.energyCost;
         }
-
-        // 确保气量不为负
-        this.energy = Math.max(0, this.energy);
     }
 
-    // 受到伤害
-    takeDamage(amount) {
-        if (amount <= 0) return;
+    // 受到攻击时的处理
+    handleAttack(attackAction, attacker) {
+        const damage = attackAction.damage || 0;
+        const reduction = this.currentAction && this.currentAction.reduction ? this.currentAction.reduction : 0;
+        const actualDamage = Math.max(0, damage - reduction);
+        this.health -= actualDamage;
 
-        this.health -= amount;
         if (this.health <= 0) {
-            this.health = 0;
             this.isAlive = false;
         }
-    }
 
-    // 治疗
-    heal(amount) {
-        this.health = Math.min(this.maxHealth, this.health + amount);
-        if (this.health > 0) {
-            this.isAlive = true;
+        // 反弹伤害
+        let reboundApplied = 0;
+        if (this.currentAction && this.currentAction.reboundDamage) {
+            attacker.health -= this.currentAction.reboundDamage;
+            reboundApplied = this.currentAction.reboundDamage;
+            if (attacker.health <= 0) {
+                attacker.isAlive = false;
+            }
         }
+
+        // 返回伤害明细，便于 Game 侧记录日志
+        return {
+            damage,
+            reduction,
+            actualDamage,
+            reboundToAttacker: reboundApplied,
+            defenderRemaining: this.health,
+            attackerRemaining: attacker.health
+        };
     }
 
-    // 增加气量
-    addEnergy(amount) {
-        this.energy += amount;
+    // 清理回合数据
+    resetRound() {
+        this.currentAction = null;
+        this.target = null;
     }
 
-    // 重置为新一轮
+    // 开局/新回合重置（与 resetRound 类似，预留将来扩展）
     resetForNewRound() {
         this.currentAction = null;
         this.target = null;
+    }
+
+    // 回合结束时的气量调整
+    recoverEnergy(amount) {
+        this.energy += amount;
     }
 
     // 获取状态信息
@@ -118,6 +140,7 @@ export class Player {
             health: this.health,
             energy: this.energy,
             isAlive: this.isAlive,
+            isBot: !!this.isBot,
             currentAction: this.currentAction ? this.currentAction.name : '无',
             target: this.target ? this.target.name : '无'
         };

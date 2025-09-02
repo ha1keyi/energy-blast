@@ -1,10 +1,11 @@
-import { ACTION_KEYS } from '../core/constants/Actions.js';
+import { ACTIONS, ACTION_KEYS } from '../core/constants/Actions.js';
 
 export class DebugUIManager {
     constructor(game) {
         this.game = game;
         this.debugPanel = null;
         this.isAutoResolve = false; // 默认不自动解析
+        this._pendingSelections = new Map(); // 新增：未设定的临时选择缓冲
         this.setupDebugUI();
     }
 
@@ -13,6 +14,12 @@ export class DebugUIManager {
         this.bindEvents();
         this.updateLobbyList();
         this.updatePlayerList();
+        // 新增：初始化时同步一次游戏状态
+        this.updateGameState();
+        // 新增：订阅 Lobby 变化 -> 及时刷新大厅区
+        if (window.lobby && typeof window.lobby.subscribe === 'function') {
+            window.lobby.subscribe(() => this.updateLobbyList());
+        }
     }
 
     createDebugPanel() {
@@ -39,42 +46,30 @@ export class DebugUIManager {
             <h3 style="margin: 0 0 15px 0; color: #4ecdc4;">🎮 游戏调试面板</h3>
             
             <div style="margin-bottom: 15px;">
-                <label style="display: flex; align-items: center; gap: 8px;">
-                    <input type="checkbox" id="auto-resolve" ${this.isAutoResolve ? 'checked' : ''}>
-                    自动轮次结算 (5秒)
-                </label>
+                <button id="start-game" style="background: #27ae60; margin-right: 8px;">开始游戏</button>
+                <button id="resolve-round" style="background: #f39c12; margin-left: 8px;">手动结算</button>
+               <label style="margin-left:12px; font-size:13px;">
+                   <input type="checkbox" id="auto-resolve" style="vertical-align:middle; margin-right:4px;">自动结算
+               </label>
             </div>
 
             <div style="margin-bottom: 15px;">
-                <button id="start-game" style="background: #27ae60; margin-right: 8px;">开始游戏</button>
-                <button id="resolve-now" style="background: #f39c12;">立即结算</button>
-                <button id="end-game" style="background: #e74c3c; margin-left: 8px;">结束游戏</button>
+                <h4 style="margin: 0 0 10px 0; color: #3498db;">大厅玩家</h4>
+                <button id="add-player" style="background: #2980b9; margin-bottom: 8px;">添加虚拟玩家</button>
+                <div id="debug-lobby-list"></div>
             </div>
 
-                        <div style="margin-bottom: 15px;">
-                                <h4 style="margin: 0 0 10px 0; color: #3498db;">玩家管理（大厅/游戏）</h4>
-                <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                    <input type="text" id="new-player-name" placeholder="玩家名称" style="flex: 1; padding: 5px;">
-                    <button id="add-player" style="background: #2ecc71;">新增玩家</button>
-                    <button id="toggle-ready" style="background: #8e44ad;">切换自己准备</button>
-                </div>
-                                <div style="display: grid; gap: 8px;">
-                                    <div>
-                                        <div style="font-weight:bold; margin-bottom:6px; color:#f1c40f;">大厅玩家</div>
-                                        <div id="debug-lobby-list"></div>
-                                    </div>
-                                    <div>
-                                        <div style="font-weight:bold; margin:8px 0 6px; color:#1abc9c;">游戏内玩家</div>
-                                        <div id="debug-player-list"></div>
-                                    </div>
-                                </div>
+            <!-- 新增：游戏内玩家列表（本地 Game 管理） -->
+            <div style="margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #16a085;">游戏内玩家</h4>
+                <div id="debug-player-list"></div>
             </div>
 
             <div style="margin-bottom: 15px;">
                 <h4 style="margin: 0 0 10px 0; color: #9b59b6;">游戏状态</h4>
-                <div>当前回合: <span id="current-round">0</span></div>
+                <div>房间ID: <span id="room-id">-</span></div>
+                <div>玩家ID: <span id="player-id">-</span></div>
                 <div>游戏状态: <span id="game-state">idle</span></div>
-                <div>存活玩家: <span id="alive-count">0</span></div>
             </div>
 
             <div>
@@ -88,73 +83,149 @@ export class DebugUIManager {
 
     bindEvents() {
         // 自动解析开关
-        document.getElementById('auto-resolve').addEventListener('change', (e) => {
-            this.isAutoResolve = e.target.checked;
-            if (!this.isAutoResolve && this.game.timer) {
-                clearTimeout(this.game.timer);
-            }
-        });
+        const autoResolveEl = document.getElementById('auto-resolve');
+        if (autoResolveEl) {
+            autoResolveEl.checked = this.isAutoResolve;
+            autoResolveEl.addEventListener('change', (e) => {
+                this.isAutoResolve = e.target.checked;
+                if (!this.isAutoResolve && this.game.timer) {
+                    clearTimeout(this.game.timer);
+                    this.game.timer = null;
+                }
+                if (this.isAutoResolve && this.game.isRunning && this.game.gameState === 'selecting' && !this.game.timer) {
+                    this.game.timer = setTimeout(async () => {
+                        await this.game.processRound();
+                    }, this.game.roundTime);
+                }
+                (window.showToast || alert)(`已切换为${this.isAutoResolve ? '自动' : '手动'}结算`);
+            });
+        }
 
-        // 游戏控制按钮
-        document.getElementById('start-game').addEventListener('click', () => {
+        // 开始游戏
+        const startBtn = document.getElementById('start-game');
+        startBtn?.addEventListener('click', () => {
             try {
-                if (window.lobby && window.lobby.players?.length) {
+                if (window.lobby && typeof window.lobby.list === 'function' && window.lobby.list()?.length) {
                     if (window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
                         window.startGameFromLobby();
                     } else {
-                        alert('请在大厅中让所有玩家准备好再开始');
+                        (window.showToast || alert)('请在大厅中让所有玩家准备好再开始');
                     }
                 } else {
-                    // No lobby in use; start with existing game players
                     if (this.game.players.length < 2) throw new Error('至少需要2名玩家才能开始游戏');
                     this.game.startGame();
                 }
                 this.updateGameState();
             } catch (error) {
-                alert(error.message);
+                (window.showToast || alert)(error.message);
             }
         });
 
-        document.getElementById('resolve-now').addEventListener('click', () => {
-            if (this.game.gameState === 'selecting') {
-                this.game.resolveActions();
-                this.updateGameState();
-            }
-        });
-
-        document.getElementById('end-game').addEventListener('click', () => {
-            this.game.endGame();
-            this.updateGameState();
-        });
-
-        // 新增玩家（优先加入大厅，若未使用大厅则加入游戏）
-        document.getElementById('add-player').addEventListener('click', () => {
-            const nameInput = document.getElementById('new-player-name');
-            const name = nameInput.value.trim() || `玩家 ${(window.lobby?.players?.length || this.game.players.length) + 1}`;
-
-            if (window.lobby) {
-                window.lobby.add(name);
-                // 刷新大厅与调试列表
-                if (typeof window.renderLobby === 'function') window.renderLobby();
-                this.updateLobbyList();
-            } else {
-                this.game.addPlayer(name);
-                this.updatePlayerList();
-            }
-            nameInput.value = '';
-        });
-
-        // 切换自己准备（仅大厅有效）
-        document.getElementById('toggle-ready').addEventListener('click', () => {
-            if (window.lobby) {
-                const self = window.lobby.get(1) || window.lobby.add('玩家1 (你)');
-                self.ready = !self.ready;
-                if (typeof window.renderLobby === 'function') window.renderLobby();
-                this.updateLobbyList();
-                // 若所有人准备好则走大厅开始流程
-                if (window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
-                    window.startGameFromLobby();
+        // 添加虚拟玩家（仅房主可在大厅添加虚拟玩家；无大厅时则直接向本地游戏添加）
+        const addPlayerBtn = document.getElementById('add-player');
+        addPlayerBtn?.addEventListener('click', () => {
+            if (window.lobby && typeof window.lobby.isHost === 'function') {
+                if (!window.lobby.roomId) {
+                    (window.showToast || alert)('请先创建或加入房间');
+                    return;
                 }
+                if (!window.lobby.isHost()) {
+                    (window.showToast || alert)('只有房主可以添加虚拟玩家');
+                    return;
+                }
+                const name = `虚拟玩家${Math.floor(Math.random() * 1000)}`;
+                window.lobby.addBot?.(name);
+                if (typeof window.renderLobby === 'function') window.renderLobby();
+                this.updateLobbyList();
+                return;
+            }
+            // 无大厅：直接向本地游戏添加一个演示玩家
+            this.addVirtualPlayer();
+        });
+
+        const resolveRoundBtn = document.getElementById('resolve-round');
+        resolveRoundBtn?.addEventListener('click', () => {
+            if (this.isAutoResolve) {
+                (window.showToast || alert)('请先关闭自动结算');
+                return;
+            }
+            // 修复：手动结算用完整流程
+            if (typeof this.game.processRound === 'function') {
+                this.game.processRound();
+            }
+        });
+
+        // 动态绑定玩家相关事件
+        this.debugPanel.addEventListener('click', async (e) => {
+            // 删除玩家（游戏内）
+            if (e.target.classList.contains('remove-player')) {
+                const playerId = parseInt(e.target.dataset.id);
+                const player = this.game.players.find(p => p.id === playerId);
+                if (player) {
+                    const ok = window.showConfirm ? await window.showConfirm(`确定要删除玩家 ${player.name} 吗？`) : confirm(`确定要删除玩家 ${player.name} 吗？`);
+                    if (ok) {
+                        this.game.removePlayer(player.id);
+                    }
+                }
+            }
+            // 设置玩家行动
+            if (e.target.classList.contains('set-action-btn')) {
+                const playerCard = e.target.closest('.player-card');
+                const index = parseInt(playerCard.dataset.index);
+                const player = this.game.players[index];
+
+                const actionSelect = playerCard.querySelector('.action-select');
+                const targetSelect = playerCard.querySelector('.target-select');
+
+                const actionKey = actionSelect.value;
+                const targetId = targetSelect.value ? parseInt(targetSelect.value) : null;
+                const targetPlayer = targetId ? this.game.players.find(p => p.id === targetId) : null;
+
+                try {
+                    player.selectAction(actionKey, targetPlayer);
+                    // 设定成功后清除该玩家的 pending 缓冲
+                    this._pendingSelections.delete(player.id);
+                    console.log(`${player.name} set action to ${actionKey} targeting ${targetPlayer ? targetPlayer.name : 'none'}`);
+                    this.updatePlayerList(); // 只在设定后刷新
+                } catch (error) {
+                    (window.showToast || alert)(error.message);
+                    console.error(error);
+                }
+            }
+
+        });
+
+        this.debugPanel.addEventListener('change', (e) => {
+            const playerCard = e.target.closest('.player-card');
+            if (!playerCard) return;
+
+            const index = parseInt(playerCard.dataset.index);
+            const player = this.game.players[index];
+
+            if (e.target.classList.contains('health-input')) {
+                const health = parseInt(e.target.value);
+                player.health = health;
+                player.isAlive = health > 0;
+                this.updatePlayerList();
+                return;
+            }
+
+            if (e.target.classList.contains('energy-input')) {
+                const energy = parseInt(e.target.value);
+                player.energy = energy;
+                this.updatePlayerList();
+                return;
+            }
+
+            // 新增：行动/目标下拉改变时只缓存在 pending，不提交，避免刷新覆盖
+            if (e.target.classList.contains('action-select') || e.target.classList.contains('target-select')) {
+                const card = e.target.closest('.player-card');
+                const actionSel = card.querySelector('.action-select');
+                const targetSel = card.querySelector('.target-select');
+                const actionKey = actionSel?.value || '';
+                const targetId = targetSel?.value ? parseInt(targetSel.value) : null;
+                this._pendingSelections.set(player.id, { actionKey, targetId });
+                return;
             }
         });
     }
@@ -166,189 +237,188 @@ export class DebugUIManager {
             container.innerHTML = '<div style="opacity:.7;">无大厅（直接向游戏添加玩家）</div>';
             return;
         }
-        const players = window.lobby.players || [];
+        const players = (typeof window.lobby.list === 'function') ? window.lobby.list() : (window.lobby.players || []);
         if (!players.length) {
             container.innerHTML = '<div style="opacity:.7;">暂无玩家</div>';
             return;
         }
-        container.innerHTML = players.map(p => `
+        const selfId = window.lobby.playerId;
+        const isHost = typeof window.lobby.isHost === 'function' ? window.lobby.isHost() : false;
+        container.innerHTML = players.map(p => {
+            const canToggle = p.isBot || p.id === selfId; // 只能切换自己或虚拟玩家
+            const canRemove = !!p.isBot && isHost; // 仅房主可删除虚拟玩家
+            return `
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:6px; background: rgba(255,255,255,0.08); border-radius:4px; margin-bottom:6px;">
                         <div>
-                            <strong>${p.name}</strong>
+                            <strong>${p.name}${p.isBot ? ' (虚拟)' : ''}</strong>
                             <span style="margin-left:8px; font-size:12px; color:${p.ready ? '#2ecc71' : '#bdc3c7'};">${p.ready ? '已准备' : '未准备'}</span>
                         </div>
                         <div style="display:flex; gap:6px;">
-                            <button class="lobby-toggle-ready" data-id="${p.id}" style="background:#8e44ad; padding:4px 8px;">切换准备</button>
-                            <button class="lobby-remove" data-id="${p.id}" style="background:#e74c3c; padding:4px 8px;">删除</button>
+                            <button class="lobby-toggle-ready" data-id="${p.id}" style="background:#8e44ad; padding:4px 8px;" ${canToggle ? '' : 'disabled'}>切换准备</button>
+                            <button class="lobby-remove" data-id="${p.id}" style="background:#e74c3c; padding:4px 8px;" ${canRemove ? '' : 'disabled'}>删除</button>
                         </div>
                     </div>
-                `).join('');
+                `;
+        }).join('');
 
         // 绑定事件
         container.querySelectorAll('.lobby-toggle-ready').forEach(btn => {
             btn.onclick = (e) => {
-                const id = parseInt(e.currentTarget.dataset.id);
-                const p = window.lobby.get(id);
+                const id = e.currentTarget.dataset.id; // id 可以是字符串
+                const p = (typeof window.lobby.get === 'function') ? window.lobby.get(id) : (players.find(x => String(x.id) === String(id)));
                 if (!p) return;
-                p.ready = !p.ready;
+                if (p.isBot && typeof window.lobby.setReady === 'function') {
+                    window.lobby.setReady(id, !p.ready);
+                } else if (String(id) === String(selfId)) {
+                    window.lobby.toggleReady();
+                } else {
+                    (window.showToast || alert)('不能修改其他真实玩家的准备状态');
+                    return;
+                }
                 if (typeof window.renderLobby === 'function') window.renderLobby();
                 this.updateLobbyList();
-                if (window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
+                if (window.lobby.allReady && window.lobby.allReady() && typeof window.startGameFromLobby === 'function') {
                     window.startGameFromLobby();
                 }
             };
         });
         container.querySelectorAll('.lobby-remove').forEach(btn => {
-            btn.onclick = (e) => {
-                const id = parseInt(e.currentTarget.dataset.id);
-                if (!window.lobby) return;
-                window.lobby.players = window.lobby.players.filter(p => p.id !== id);
+            btn.onclick = async (e) => {
+                const id = e.currentTarget.dataset.id; // 可能是字符串
+                const p = (typeof window.lobby.get === 'function') ? window.lobby.get(id) : (players.find(x => String(x.id) === String(id)));
+                if (!p) return;
+                if (!p.isBot) {
+                    (window.showToast || alert)('只能删除虚拟玩家');
+                    return;
+                }
+                if (!(typeof window.lobby.isHost === 'function' && window.lobby.isHost())) {
+                    (window.showToast || alert)('只有房主可以删除虚拟玩家');
+                    return;
+                }
+                const ok = window.showConfirm ? await window.showConfirm(`确定要删除 ${p.name} 吗？`) : confirm(`确定要删除 ${p.name} 吗？`);
+                if (!ok) return;
+                if (typeof window.lobby.remove === 'function') {
+                    window.lobby.remove(id);
+                }
                 if (typeof window.renderLobby === 'function') window.renderLobby();
                 this.updateLobbyList();
             };
         });
     }
 
+    // 新增：同步游戏状态（回合、状态、日志等）
+    updateGameState() {
+        try {
+            const state = typeof this.game.getGameState === 'function' ? this.game.getGameState() : null;
+            if (!state) return;
+
+            const roomIdEl = document.getElementById('room-id');
+            if (roomIdEl) roomIdEl.textContent = (window.lobby && window.lobby.roomId) ? window.lobby.roomId : '-';
+
+            const playerIdEl = document.getElementById('player-id');
+            if (playerIdEl) playerIdEl.textContent = (window.myPlayerId) ? window.myPlayerId : '-';
+
+            const gameStateEl = document.getElementById('game-state');
+            if (gameStateEl) gameStateEl.textContent = `${state.state}${state.round ? ` (第${state.round}轮)` : ''}`;
+
+            const logsEl = document.getElementById('game-logs');
+            if (logsEl) {
+                logsEl.innerHTML = state.logs.map(l => `<div>[${l.round}] ${l.message}</div>`).join('');
+                logsEl.scrollTop = logsEl.scrollHeight;
+            }
+        } catch (e) {
+            console.warn('updateGameState error:', e);
+        }
+    }
+
     updatePlayerList() {
-        const playerList = document.getElementById('debug-player-list');
-        playerList.innerHTML = '';
+        const playerListContainer = document.getElementById('debug-player-list');
+        if (!playerListContainer) return;
 
-        this.game.players.forEach((player, index) => {
-            const playerCard = document.createElement('div');
-            playerCard.style.cssText = `
-                background: rgba(255, 255, 255, 0.1);
-                padding: 10px;
-                margin-bottom: 8px;
-                border-radius: 4px;
-                border-left: 4px solid ${player.isAlive ? '#2ecc71' : '#e74c3c'};
-            `;
+        const players = this.game.players || [];
+        playerListContainer.innerHTML = players.map((player, index) => {
+            const isVirtual = player.name.includes('虚拟');
+            const otherPlayers = players.filter(p => p.id !== player.id);
 
-            // Action and Target selection dropdowns
-            const actionOptions = ACTION_KEYS.map(key => `<option value="${key}">${key}</option>`).join('');
+            const pending = this._pendingSelections.get(player.id) || null;
+            const pendingActionKey = pending?.actionKey ?? null;
+            const pendingTargetId = pending?.targetId ?? null;
 
-            let targetOptions = '<option value="">-- 无目标 --</option>';
-            this.game.players.forEach(p => {
-                if (p.id !== player.id) {
-                    targetOptions += `<option value="${p.id}">${p.name}</option>`;
-                }
-            });
+            let actionOptions = '<option value="" ' + (!pendingActionKey && !player.currentAction ? 'selected' : '') + '>无</option>';
+            actionOptions += ACTION_KEYS.map((key) => {
+                const cfg = ACTIONS[key];
+                const selectedByPending = pendingActionKey ? (key === pendingActionKey) : false;
+                const selectedByCurrent = !pendingActionKey && player.currentAction && cfg && (cfg.type === player.currentAction.type) && (cfg.level === player.currentAction.level);
+                const selected = (selectedByPending || selectedByCurrent) ? 'selected' : '';
+                return `<option value="${key}" ${selected}>${cfg?.name || key}</option>`;
+            }).join('');
 
-            const actionSelectionHTML = `
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-                    <div style="display: flex; gap: 5px; align-items: center;">
-                        <select id="action-select-${player.id}" class="action-select" data-index="${index}" style="flex: 1;">${actionOptions}</select>
-                        <select id="target-select-${player.id}" class="target-select" data-index="${index}" style="flex: 1;">${targetOptions}</select>
-                        <button id="set-action-btn-${player.id}" class="set-action-btn" data-index="${index}" style="background: #3498db; padding: 4px 8px;">设置</button>
+            return `
+                <div class="player-card" data-index="${index}" style="border: 1px solid ${isVirtual ? '#f39c12' : '#3498db'}; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong>${player.name} (ID: ${player.id})</strong>
+                        <button class="remove-player" data-id="${player.id}" style="background: #e74c3c; padding: 4px 8px;">删除</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                        <div>
+                            <label>HP:</label>
+                            <input type="number" class="health-input" value="${player.health}" style="width: 60px;">
+                        </div>
+                        <div>
+                            <label>气:</label>
+                            <input type="number" class="energy-input" value="${player.energy}" style="width: 60px;">
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px;">
+                        <label>行动:</label>
+                        <select class="action-select">
+                            ${actionOptions}
+                        </select>
+                        <select class="target-select">
+                            <option value="">--选择目标--</option>
+                            ${otherPlayers.map(p => {
+                const selected = (pendingTargetId != null)
+                    ? (pendingTargetId === p.id ? 'selected' : '')
+                    : (player.target && player.target.id === p.id ? 'selected' : '');
+                return `<option value="${p.id}" ${selected}>${p.name}</option>`;
+            }).join('')}
+                        </select>
+                        <button class="set-action-btn" style="background: #2ecc71; margin-left: 8px;">设定</button>
+                    </div>
+                    <div style="font-size: 12px; margin-top: 5px; color: #bdc3c7;">
+                        当前行动: ${player.currentAction ? player.currentAction.name : '-'} | 目标: ${player.target ? player.target.name : '-'}
                     </div>
                 </div>
             `;
-
-
-            playerCard.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <strong>${player.name} ${!player.isAlive ? '💀' : ''}</strong>
-                    <button id="remove-player-btn-${player.id}" class="remove-player" data-id="${player.id}" style="background: #e74c3c; padding: 2px 6px; font-size: 12px;">删除</button>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font-size: 12px;">
-                    <div>生命: <input type="number" id="health-input-${player.id}" class="health-input" data-index="${index}" value="${player.health}" min="0" max="10" style="width: 40px;"></div>
-                    <div>气量: <input type="number" id="energy-input-${player.id}" class="energy-input" data-index="${index}" value="${player.energy}" min="0" max="10" style="width: 40px;"></div>
-                    <div>分数: ${player.score}</div>
-                    <div>状态: ${player.isAlive ? '存活' : '死亡'}</div>
-                </div>
-                <div style="margin-top: 5px; font-size: 11px; color: #bbb;">
-                    当前操作: ${player.currentAction ? `${player.currentAction.name} -> ${player.target ? player.target.name : '无'}` : '未选择'}
-                </div>
-                ${player.isAlive && this.game.gameState === 'selecting' ? actionSelectionHTML : ''}
-            `;
-
-            playerList.appendChild(playerCard);
-        });
-
-        // 绑定删除和输入事件
-        this.bindPlayerEvents();
+        }).join('');
     }
 
-    bindPlayerEvents() {
-        // 删除玩家
-        document.querySelectorAll('.remove-player').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const playerId = parseInt(e.target.dataset.id);
-                const player = this.game.players.find(p => p.id === playerId);
-                if (confirm(`确定要删除玩家 ${player.name} 吗？`)) {
-                    this.game.removePlayer(player.id);
-                }
-            });
-        });
-
-        // 修改生命值
-        document.querySelectorAll('.health-input').forEach(input => {
-            input.addEventListener('change', (e) => {
-                const index = parseInt(e.target.dataset.index);
-                const health = parseInt(e.target.value);
-                this.game.players[index].health = health;
-                this.game.players[index].isAlive = health > 0;
-                this.updatePlayerList();
-            });
-        });
-
-        // 修改气量
-        document.querySelectorAll('.energy-input').forEach(input => {
-            input.addEventListener('change', (e) => {
-                const index = parseInt(e.target.dataset.index);
-                const energy = parseInt(e.target.value);
-                this.game.players[index].energy = energy;
-                this.updatePlayerList();
-            });
-        });
-
-        document.querySelectorAll('.set-action-btn').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const index = parseInt(e.target.dataset.index);
-                const player = this.game.players[index];
-
-                const actionSelect = e.target.closest('div').querySelector('.action-select');
-                const targetSelect = e.target.closest('div').querySelector('.target-select');
-
-                const actionKey = actionSelect.value;
-                const targetId = targetSelect.value ? parseInt(targetSelect.value) : null;
-                const targetPlayer = targetId ? this.game.players.find(p => p.id === targetId) : null;
-
-                try {
-                    player.selectAction(actionKey, targetPlayer);
-                    console.log(`${player.name} set action to ${actionKey} targeting ${targetPlayer ? targetPlayer.name : 'none'}`);
-                    this.updatePlayerList(); // Refresh UI to show selected action
-                } catch (error) {
-                    alert(error.message);
-                    console.error(error);
-                }
-            });
-        });
+    addVirtualPlayer() {
+        const name = `玩家${this.game.players.length + 1}`;
+        this.game.addPlayer(name);
+        this.updatePlayerList();
+        this.updateGameState();
+        (window.showToast || alert)(`已添加 ${name}`);
     }
 
-    updateGameState() {
-        document.getElementById('current-round').textContent = this.game.currentRound;
-        document.getElementById('game-state').textContent = this.game.gameState;
-        document.getElementById('alive-count').textContent = this.game.playerManager.getAlivePlayers().length;
-
-        // 更新日志
-        const logsContainer = document.getElementById('game-logs');
-        logsContainer.innerHTML = this.game.logs
-            .slice(-10)
-            .map(log => `<div style="margin-bottom: 2px;">[${log.round}] ${log.message}</div>`)
-            .join('');
-        logsContainer.scrollTop = logsContainer.scrollHeight;
+    // 定时刷新（供外部调用）
+    startUpdating(intervalMs = 2000) {
+        if (this._updateTimer) clearInterval(this._updateTimer);
+        this._updateTimer = setInterval(() => {
+            try {
+                this.updateGameState();
+                // this.updatePlayerList(); // 仍保持不定时刷新玩家下拉，防止覆盖
+                this.updateLobbyList();
+            } catch (e) {
+                console.warn('DebugUI auto update error:', e);
+            }
+        }, intervalMs);
     }
 
-    // 定期更新界面
-    startUpdating() {
-        setInterval(() => {
-            this.updateGameState();
-            this.updateLobbyList();
-        }, 1000);
-    }
-
-    // 切换显示/隐藏
-    toggleVisibility() {
-        this.debugPanel.style.display = this.debugPanel.style.display === 'none' ? 'block' : 'none';
+    stopUpdating() {
+        if (this._updateTimer) {
+            clearInterval(this._updateTimer);
+            this._updateTimer = null;
+        }
     }
 }

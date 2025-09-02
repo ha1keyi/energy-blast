@@ -15,6 +15,8 @@ export class Game {
         this.gameState = 'idle'; // idle, selecting, resolving, ended
         this.debugUIManager = null;
         this.playerManager = this;
+        // 可选挂载：由 GameScene 在运行时创建并注入
+        this.roundResolutionManager = this.roundResolutionManager || null;
     }
 
     setDebugUIManager(manager) {
@@ -25,13 +27,22 @@ export class Game {
         }
     }
 
-    addPlayer(name) {
+    addPlayer(name, options = {}) {
         // Enforce unique player names in game
         if (this.players.some(p => p.name === name)) {
             throw new Error('玩家不能重名');
         }
         const newId = this.players.length > 0 ? Math.max(...this.players.map(p => p.id)) + 1 : 1;
         const player = new Player(newId, name);
+        // 预留：虚拟玩家/AI 控制
+        if (options && typeof options.isBot === 'boolean') player.isBot = !!options.isBot;
+        if (options && options.controller) {
+            if (typeof player.setController === 'function') {
+                player.setController(options.controller);
+            } else {
+                player.controller = options.controller;
+            }
+        }
         this.players.push(player);
         if (this.debugUIManager) {
             this.debugUIManager.updatePlayerList();
@@ -76,121 +87,124 @@ export class Game {
         this.currentRound++;
         this.gameState = 'selecting';
 
-        this.addLog(`第 ${this.currentRound} 轮开始！`);
-        this.addLog('请玩家选择操作...');
-
-        this.players.forEach(player => {
-            if (player.isAlive) {
-                player.resetForNewRound();
-            }
-        });
+        this.clearTimer();
+        this.nextFrame();
+        // 仅在自动结算下才定时推进
+        if (this.debugUIManager?.isAutoResolve) {
+            this.timer = setTimeout(async () => {
+                await this.processRound();
+            }, this.roundTime);
+        }
 
         if (this.debugUIManager) {
             this.debugUIManager.updateGameState();
-            this.debugUIManager.updatePlayerList(); // Ensure controls are visible
-        }
-
-        // Clear any existing timer before starting a new round decision
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-        }
-
-        // Only set a new timer if auto-resolve is enabled
-        if (this.debugUIManager && this.debugUIManager.isAutoResolve) {
-            this.timer = setTimeout(() => {
-                this.resolveActions();
-            }, this.roundTime);
         }
     }
 
     async resolveActions() {
-        if (this.gameState !== 'selecting') return;
-
         this.gameState = 'resolving';
-        this.clearTimer();
+        // 通知结算表现：开始展示动作
+        this.roundResolutionManager?.onResolvingStart();
 
-        this.addLog('开始解析操作...');
+        const actionResults = [];
 
-        // 分步骤执行，避免阻塞主线程
-        await this.processRound();
+        // 先结算防御，确保减伤生效
+        for (const player of this.players) {
+            if (player.currentAction && player.currentAction.type === ActionType.DEFEND) {
+                actionResults.push(`${player.name} 进行了防御。`);
+            }
+        }
+
+        // 然后结算攻击
+        for (const player of this.players) {
+            if (player.currentAction && player.currentAction.type === ActionType.ATTACK && player.target) {
+                this.executeAttack(player, player.target);
+                actionResults.push(`${player.name} 攻击了 ${player.target.name}！`);
+            }
+        }
+
+        // 后结算储能
+        for (const player of this.players) {
+            if (player.currentAction && player.currentAction.type === ActionType.STORE) {
+                actionResults.push(`${player.name} 选择了储能。`);
+            }
+        }
+
+        this.addLog(actionResults.join(' '));
     }
 
     async processRound() {
-        await this.adjustPlayerEnergies();
+        await this.resolveActions();
         await this.resolveCombat();
         await this.finalizeRound();
     }
 
     async adjustPlayerEnergies() {
-        const alivePlayers = this.players.filter(p => p.isAlive);
-        for (const player of alivePlayers) {
-            if (player.currentAction) {
+        // 统一在 finalizeRound 中按当前动作扣费/结算
+        for (const player of this.players) {
+            const a = player.currentAction;
+            if (a && a.type === ActionType.STORE) {
+                const before = player.energy;
+                const gain = a.getEnergyGain();
+                player.recoverEnergy(gain);
+                this.addLog(`${player.name} 储能 +${gain} 气（${before} → ${player.energy}）`);
+            } else if (a) {
+                const before = player.energy;
+                const cost = a.energyCost || 0;
                 player.adjustEnergy();
+                this.addLog(`${player.name} 消耗 ${cost} 气（${before} → ${player.energy}）`);
             }
         }
-        // 更新UI显示最新的气量
-        if (this.debugUIManager) this.debugUIManager.updatePlayerList();
-        await this.nextFrame();
     }
 
     async resolveCombat() {
-        const alivePlayers = this.players.filter(p => p.isAlive);
-        const processed = new Set();
-
-        for (const attacker of alivePlayers) {
-            if (processed.has(attacker.id)) continue;
-
-            if (attacker.currentAction?.type === ActionType.ATTACK && attacker.target) {
-                const attackee = attacker.target;
-
-                // 确保目标存活且未被处理
-                if (attackee.isAlive && !processed.has(attackee.id)) {
-                    const result = this.executeAttack(attacker, attackee);
-
-                    processed.add(attacker.id);
-                    processed.add(attackee.id);
-
-                    // 更新UI显示战斗结果
-                    if (this.debugUIManager) this.debugUIManager.updatePlayerList();
-                    await this.nextFrame(); // 关键：每处理一个攻击等待一帧
-                }
+        for (const player of this.players) {
+            if (player.currentAction && player.currentAction.type === ActionType.ATTACK && player.target) {
+                this.executeAttack(player, player.target);
             }
         }
     }
 
     executeAttack(attacker, attackee) {
-        // 封装了原有的策略模式战斗逻辑
-        let result;
-        if (attackee.target && attackee.target.id !== attacker.id) {
-            const damage = attacker.currentAction.getActualDamage();
-            attackee.takeDamage(damage);
-            result = {
-                message: `${attacker.name}偷袭了正在攻击他人的${attackee.name}，造成${damage}点伤害`,
-                damage: damage,
-                type: 'sneak-attack'
-            };
-        } else {
-            const strategy = StrategyFactory.getStrategyForActions(
-                attacker.currentAction,
-                attackee.currentAction
-            );
-            result = strategy.execute(attacker, attackee);
+        const attackAction = attacker.currentAction;
+        if (!attackAction || attackAction.type !== ActionType.ATTACK) return;
+        // 让被攻击方处理并返回明细，用于日志
+        const result = attackee.handleAttack(attackAction, attacker);
+        if (result) {
+            const segments = [];
+            const base = `${attacker.name} 使用 ${attackAction.name} 对 ${attackee.name} 造成 ${result.actualDamage} 伤害`;
+            segments.push(base);
+            if (result.reduction > 0) {
+                segments.push(`（被防御减免 ${result.reduction}）`);
+            }
+            if (result.reboundToAttacker > 0) {
+                segments.push(`；反弹 ${result.reboundToAttacker} 伤害给 ${attacker.name}`);
+            }
+            this.addLog(segments.join(''));
         }
-        // 统一在此处记录日志
-        this.addLog(result.message);
-        return result;
     }
 
     async finalizeRound() {
-        await this.nextFrame();
-        if (!this.checkGameEnd()) {
+        // 结算阶段结束：先让表现管理器清理（动作/目标尚未被清空）
+        this.roundResolutionManager?.onResolvingEnd();
+
+        await this.adjustPlayerEnergies();
+
+        // 清理动作/目标
+        this.players.forEach(p => p.resetRound());
+
+        if (this.debugUIManager) {
+            this.debugUIManager.updatePlayerList();
+        }
+
+        this.checkGameEnd();
+        if (this.isRunning) {
             this.prepareNextRound();
         }
     }
 
     nextFrame() {
-        return new Promise(resolve => requestAnimationFrame(resolve));
+        // 预留：与渲染层联动
     }
 
     clearTimer() {
@@ -201,60 +215,37 @@ export class Game {
     }
 
     checkGameEnd() {
-        const alivePlayers = this.players.filter(player => player.isAlive);
-
+        const alivePlayers = this.players.filter(p => p.isAlive);
         if (alivePlayers.length <= 1) {
-            this.gameState = 'ended';
             this.isRunning = false;
-
+            this.gameState = 'ended';
             if (alivePlayers.length === 1) {
-                const winner = alivePlayers[0];
-                winner.score++;
-                this.addLog(`游戏结束！${winner.name}获胜！`);
+                this.addLog(`${alivePlayers[0].name} 获胜！`);
             } else {
-                this.addLog('游戏结束！平局！');
+                this.addLog('所有玩家被淘汰，平局。');
             }
-
-            return true;
+            this.clearTimer();
+            if (this.debugUIManager) {
+                this.debugUIManager.updateGameState();
+            }
         }
-
-        return false;
     }
 
     prepareNextRound() {
-        if (this.gameState === 'ended') {
-            if (this.debugUIManager) {
-                this.debugUIManager.updateGameState();
-                this.debugUIManager.updatePlayerList();
-            }
-            return;
+        this.gameState = 'selecting';
+        this.clearTimer();
+        if (this.debugUIManager?.isAutoResolve) {
+            this.timer = setTimeout(async () => {
+                await this.processRound();
+            }, this.roundTime);
         }
-
-        this.players.forEach(player => {
-            if (player.isAlive) {
-                player.resetForNewRound();
-            }
-        });
-
-        this.gameState = 'idle';
-
-        setTimeout(() => {
-            this.startRound();
-        }, 2000);
+        if (this.debugUIManager) {
+            this.debugUIManager.updateGameState();
+        }
     }
 
     addLog(message) {
-        this.logs.push({
-            round: this.currentRound,
-            message: message,
-            timestamp: Date.now()
-        });
-
-        if (this.logs.length > 100) {
-            this.logs.shift();
-        }
-
-        console.log(`[Round ${this.currentRound}] ${message}`);
+        this.logs.push({ round: this.currentRound, message });
         if (this.debugUIManager) {
             this.debugUIManager.updateGameState();
         }
@@ -263,19 +254,20 @@ export class Game {
     getGameState() {
         return {
             round: this.currentRound,
+            isRunning: this.isRunning,
+            gameState: this.gameState,
             state: this.gameState,
-            players: this.players.map(player => player.getStatus()),
-            logs: this.logs.slice(-10)
+            logs: this.logs,
+            players: this.players.map(p => p.getStatus()),
         };
     }
 
     endGame() {
         this.isRunning = false;
+        this.clearTimer();
         this.gameState = 'ended';
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
+        if (this.debugUIManager) {
+            this.debugUIManager.updateGameState();
         }
-        this.addLog('游戏被强制结束');
     }
 }

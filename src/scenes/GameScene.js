@@ -1,5 +1,7 @@
 // src/scenes/GameScene.js
 import Phaser from 'phaser';
+import { GameClient } from '../core/GameClient.js';
+import { LobbyManager } from '../managers/LobbyManager.js';
 
 // Resolve action images via Vite eager glob
 const actionImages = import.meta.glob('../assets/images/*.jpg', { eager: true });
@@ -13,7 +15,7 @@ for (const p in actionImages) {
 
 export class GameScene extends Phaser.Scene {
     constructor() {
-        super({ key: 'GameScene' });
+        super('GameScene');
     }
 
     preload() {
@@ -50,7 +52,43 @@ export class GameScene extends Phaser.Scene {
             loop: true,
             callback: () => {
                 this.updateHUD();
-                this.updateActionSprites();
+                this.updateBattleLogPanel();
+                this.updatePendingHint();
+            }
+        });
+
+        // Use LobbyManager's socket and roomId instead of undefined globals
+        const socket = LobbyManager.socket;
+        const roomId = LobbyManager.roomId || 'default';
+        if (!socket) {
+            console.warn('[GameScene] Socket not connected yet. GameClient listeners will attach after connection.');
+        }
+        this.gameClient = new GameClient(socket, roomId);
+
+        // 新增：结算表现管理器（在 window.game 就绪后挂载）
+        const core = this.getCore && this.getCore();
+        if (core && !core.roundResolutionManager) {
+            import('../managers/RoundResolutionManager.js').then(mod => {
+                const { RoundResolutionManager } = mod;
+                this.roundResolutionManager = new RoundResolutionManager(core, this);
+                core.roundResolutionManager = this.roundResolutionManager;
+            }).catch(err => {
+                console.warn('[GameScene] Failed to init RoundResolutionManager:', err);
+            });
+        }
+
+        // 初始化战斗日志面板容器
+        this.battleLogContainer = this.add.container(0, 0).setDepth(25);
+        this._lastLogCount = 0;
+
+        // Poll to refresh HUD and show chosen actions on resolve
+        this.time.addEvent({
+            delay: 300,
+            loop: true,
+            callback: () => {
+                this.updateHUD();
+                // 由 RoundResolutionManager 统一管理结算期动作图标与文本
+                this.updateBattleLogPanel();
                 this.updatePendingHint();
             }
         });
@@ -111,66 +149,65 @@ export class GameScene extends Phaser.Scene {
         return positions;
     }
 
-    // 改进的HUD更新方法
+    // 改进的HUD更新方法：渲染对手与自己HUD，并提供对手点击选目标
     updateHUD() {
         const core = this.getCore();
         if (!core) return;
+        const { width, height } = this.scale;
 
-        // Clear old
+        // 清除旧HUD
         this.hudItems.forEach(it => it.destroy());
         this.hudItems = [];
 
         const players = core.players || [];
+        if (!players.length) return;
         const selfId = window.localPlayerId || (players[0]?.id);
+        const self = players.find(p => p.id === selfId);
         const others = players.filter(p => p.id !== selfId);
-        const { width, height } = this.scale;
 
-        if (others.length === 0) return;
-
+        // 顶部/左右分布对手头像卡片
         const positions = this.getOpponentPositions(others.length, width, height);
-
         others.forEach((p, i) => {
             if (i >= positions.length) return;
             const pos = positions[i];
-            const card = this.add.container(pos.x, pos.y);
-            const shadow = this.add.rectangle(4, 4, 180, 80, 0x222222, 1);
-            const bg = this.add.rectangle(0, 0, 180, 80, 0xffffff, 1).setStrokeStyle(3, 0x000000);
-            const name = this.add.text(0, -22, p.name, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000' }).setOrigin(pos.align, 0.5);
-            const energy = this.add.text(0, 2, `气: ${p.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000' }).setOrigin(pos.align, 0.5);
-            const health = this.add.text(0, 26, `❤️: ${p.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: p.health <= 0 ? '#ff0000' : '#000' }).setOrigin(pos.align, 0.5);
-            card.add([shadow, bg, name, energy, health]);
-            // 点击对手直接作为目标
-            card.setSize(180, 80);
-            card.setInteractive(new Phaser.Geom.Rectangle(0, 0, 180, 80), Phaser.Geom.Rectangle.Contains);
-            // hover feedback when selecting
-            card.on('pointerover', () => { if (window.pendingAttack) card.setScale(1.03); });
-            card.on('pointerout', () => { if (window.pendingAttack) card.setScale(1.0); });
-            card.on('pointerdown', () => {
-                const pa = window.pendingAttack;
-                const core2 = this.getCore();
-                if (!pa || !core2) return;
-                const me = core2.players.find(x => x.id === pa.selfId);
-                if (!me || !p.isAlive) return;
-                try {
-                    me.selectAction(pa.actionKey, p);
-                    window.pendingAttack = null;
-                    if (window.debugUI) window.debugUI.updatePlayerList();
-                    // small click feedback
-                    this.tweens.add({ targets: card, scale: 1.06, yoyo: true, duration: 120, repeat: 1 });
-                } catch (e) {
-                    console.error(e);
-                }
-            });
-            if (!p.isAlive || p.health <= 0) card.setAlpha(0.5);
-            card.setDepth(10);
-            this.hudItems.push(card);
+
+            // Create a container for each opponent
+            const c = this.add.container(pos.x, pos.y).setDepth(10);
+            // Shadow + Card
+            const w = 160, h = 60;
+            // 基于对齐方式计算容器内元素的起始x（左上角）
+            const baseX = pos.align === 1 ? -w : (pos.align === 0.5 ? -w / 2 : 0);
+
+            const shadow = this.add.rectangle(baseX + 4, 4, w, h, 0x222222, 1).setOrigin(0, 0);
+            const bg = this.add.rectangle(baseX, 0, w, h, 0xffffff, 1).setStrokeStyle(3, 0x000000).setOrigin(0, 0);
+            // Name + HP + Energy（统一以 baseX 作为左侧起点，避免错位）
+            const name = this.add.text(baseX + 12, 8, p.name, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000' }).setOrigin(0, 0);
+            const hpText = this.add.text(baseX + 12, 32, `❤️ ${p.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: p.health <= 0 ? '#e74c3c' : '#000' }).setOrigin(0, 0);
+            const enText = this.add.text(baseX + 80, 32, `气 ${p.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000' }).setOrigin(0, 0);
+
+            c.add([shadow, bg, name, hpText, enText]);
+            // Hit area for clicking as target
+            const hit = this.add.rectangle(baseX, 0, w, h, 0x000000, 0.001).setOrigin(0, 0).setInteractive({ cursor: 'pointer' });
+            c.add(hit);
+
+            hit.on('pointerover', () => { bg.setFillStyle(0xfafafa, 1); });
+            hit.on('pointerout', () => { bg.setFillStyle(0xffffff, 1); });
+            hit.on('pointerdown', () => this.chooseTarget(p));
+
+            this.hudItems.push(c);
         });
 
-        // 玩家自己的HUD固定在底部中央
-        this.addPlayerHUD(width, height);
+        // 自己的HUD
+        if (self) this.addPlayerHUD(width, height);
+
+        // 底部状态条（轮数/阶段）
+        const roundState = this.add.text(Math.round(width / 2), height - 26, `第 ${core.currentRound} 轮 · ${core.gameState === 'selecting' ? '选择行动' : core.gameState === 'resolving' ? '结算中' : core.gameState === 'idle' ? '准备中' : '已结束'}`, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000', backgroundColor: '#fff'
+        }).setOrigin(0.5, 1).setDepth(15);
+        this.hudItems.push(roundState);
     }
 
-    // 玩家自己的HUD
+    // 类似修改其他方法
     addPlayerHUD(width, height) {
         const core = this.getCore();
         if (!core) return;
@@ -225,6 +262,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     updateActionSprites() {
+        // 统一交给 RoundResolutionManager 管理；此处避免重复渲染
+        if (this.roundResolutionManager) return;
+
         const core = this.getCore();
         if (!core) return;
         const state = core.gameState;
@@ -275,7 +315,71 @@ export class GameScene extends Phaser.Scene {
         const base = `${type.toLowerCase()}_${level}.jpg`;
         return actionImgMap[base] ? base : null;
     }
+
+    chooseTarget(targetPlayer) {
+        const core = this.getCore();
+        if (!core) return;
+        const pending = window.pendingAttack;
+        if (!pending) return;
+
+        const me = core.players.find(p => p.id === (window.localPlayerId || core.players[0]?.id));
+        const target = core.players.find(p => p.id === targetPlayer.id);
+        if (!me || !target) return;
+        try {
+            me.selectAction(pending.actionKey, target);
+            // 同步给可能存在的服务器（占位）
+            if (LobbyManager?.socket && LobbyManager?.roomId) {
+                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetPlayer.id);
+            }
+            if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
+                window.debugUI.updatePlayerList();
+            }
+            window.pendingAttack = null;
+            if (typeof window.showToast === 'function') window.showToast(`目标已选择：${target.name}`);
+        } catch (e) {
+            console.error(e);
+            if (typeof window.showToast === 'function') window.showToast(e.message || '选择失败');
+        }
+    }
+
+    // 最近战斗日志面板：显示最近 8 条
+    updateBattleLogPanel() {
+        const core = this.getCore && this.getCore();
+        if (!core) return;
+
+        const logs = core.logs || [];
+        if (!this.battleLogContainer) return;
+
+        // 仅当日志数量变化时重绘，减少开销
+        if (logs.length === this._lastLogCount) return;
+        this._lastLogCount = logs.length;
+
+        // 清理旧 panel
+        this.battleLogContainer.removeAll(true);
+
+        const { width, height } = this.scale;
+        const panelWidth = 420;
+        const panelHeight = 170;
+        const x = width - panelWidth - 20;
+        const y = height - panelHeight - 100;
+
+        const bg = this.add.rectangle(x, y, panelWidth, panelHeight, 0xffffff, 0.95)
+            .setStrokeStyle(3, 0x000000)
+            .setOrigin(0, 0);
+        const title = this.add.text(x + 12, y + 8, '战斗日志', {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000'
+        }).setOrigin(0, 0);
+
+        this.battleLogContainer.add([bg, title]);
+
+        const recent = logs.slice(-8);
+        let offsetY = y + 34;
+        recent.forEach(entry => {
+            const line = this.add.text(x + 12, offsetY, `R${entry.round}: ${entry.message}`, {
+                fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000'
+            }).setOrigin(0, 0);
+            this.battleLogContainer.add(line);
+            offsetY += 18;
+        });
+    }
 }
-
-
-// todo 修改对手分布逻辑
