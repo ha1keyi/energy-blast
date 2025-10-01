@@ -36,9 +36,7 @@ body {
   inset: 0;
   z-index: 20;
   pointer-events: none;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  display: block; /* 不依赖 flex 居中，改为由 #ui-container 自行居中 */
 }
 
 #ui-layer .interactive {
@@ -51,6 +49,9 @@ body {
 
 /* UI 容器（手绘描边卡片） */
 #ui-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   text-align: center;
   background: #fff;
   padding: 40px;
@@ -59,6 +60,8 @@ body {
   box-shadow: 6px 6px 0 #222;
   max-width: 640px;
   width: calc(100% - 48px);
+  /* 精准居中 + 视觉补偿 */
+  transform: translate(-50%, -50%) translate(-6px, -6px);
 }
 
 h1 {

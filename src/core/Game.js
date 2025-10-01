@@ -68,7 +68,7 @@ export class Game {
 
     startGame() {
         if (this.players.length < 2) {
-            this.logs.push('需要至少2名玩家才能开始游戏');
+            this.addLog('需要至少2名玩家才能开始游戏');
             return;
         }
         // 标记游戏开始，便于 DebugUI 的自动结算逻辑生效
@@ -76,7 +76,7 @@ export class Game {
         this.gameState = 'selecting';
         this.currentRound = 1;
         this.players.forEach(p => p.resetForNewRound());
-        this.logs.push(`第 ${this.currentRound} 回合开始`);
+        this.addLog(`第 ${this.currentRound} 回合开始`);
 
         // Sync initial state with the store
         if (this.store) {

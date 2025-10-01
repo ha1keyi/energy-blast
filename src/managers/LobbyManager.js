@@ -23,11 +23,36 @@ class LobbyManagerImpl {
     const defaultUrl = (typeof window !== 'undefined')
       ? `${window.location.protocol}//${window.location.hostname}:3000`
       : 'http://localhost:3000';
+
+    // Allow URL param overrides: ?server=host:port or full URL, or ?serverPort=3001
+    let urlOverride = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const serverParam = params.get('server') || params.get('serverUrl');
+        const serverPortParam = params.get('serverPort');
+        if (serverParam) {
+          urlOverride = serverParam.startsWith('http')
+            ? serverParam
+            : `${window.location.protocol}//${serverParam}`;
+        } else if (serverPortParam) {
+          urlOverride = `${window.location.protocol}//${window.location.hostname}:${serverPortParam}`;
+        }
+      } catch (_) {}
+    }
+
     const serverUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SERVER_URL)
       ? import.meta.env.VITE_SERVER_URL
-      : defaultUrl;
+      : (urlOverride || defaultUrl);
 
-    this.socket = io(serverUrl, { transports: ['websocket'] });
+    this.socket = io(serverUrl, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
 
     this.socket.on('connect', () => {
       console.log('Connected to server with id', this.socket.id);
@@ -50,6 +75,17 @@ class LobbyManagerImpl {
     this.socket.on('connect_error', (err) => {
       console.error('Connection Error:', err);
       this.connected = false;
+      this._emit();
+    });
+
+    // 处理加入房间等服务端返回的错误，避免进入空房间
+    this.socket.on('error', (msg) => {
+      console.warn('[Lobby error]', msg);
+      // 清理 roomId，保持在首页或当前界面
+      this.roomId = null;
+      if (typeof window !== 'undefined' && window.showToast) {
+        try { window.showToast(`加入失败：${msg}`); } catch(_) {}
+      }
       this._emit();
     });
 
@@ -82,7 +118,9 @@ class LobbyManagerImpl {
   }
 
   subscribe(fn) {
+    if (typeof fn !== 'function') return () => {};
     this._subs.add(fn);
+    return () => this._subs.delete(fn);
   }
 
   unsubscribe(fn) {
@@ -90,7 +128,7 @@ class LobbyManagerImpl {
   }
 
   _emit() {
-    this._subs.forEach(fn => fn());
+    this._subs.forEach(fn => { try { fn(); } catch (_) {} });
   }
 
   // Combined list of server players and local bots

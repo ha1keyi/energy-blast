@@ -16,6 +16,76 @@ if (typeof window !== 'undefined') {
 // Connect to the server
 LobbyManager.connect();
 
+// 附加网络同步监听
+(function setupNetworkSync(){
+  let lastBroadcast = { round: 0, state: '', logs: 0 };
+
+  // 当 socket 可用时绑定一次
+  const tryBind = () => {
+    const sock = LobbyManager.socket;
+    if (!sock) return;
+    // 非房主：收到服务器转发的结算结果，应用到本地 game
+    sock.off && sock.off('roundResolved');
+    sock.on('roundResolved', (state) => {
+      if (!LobbyManager.isHost() && window.game) {
+        const core = window.game;
+        if (core.store && typeof core.store.applySnapshot === 'function') {
+          core.store.applySnapshot(state);
+        } else {
+          // Fallback legacy path
+          const snapshot = state || {};
+          core.currentRound = snapshot.round ?? core.currentRound;
+          core.gameState = snapshot.state || snapshot.gameState || core.gameState;
+          if (Array.isArray(snapshot.logs)) core.logs = snapshot.logs.slice();
+          const byName = new Map(core.players.map(pl => [pl.name, pl]));
+          (snapshot.players || []).forEach(sp => {
+            let lp = byName.get(sp.name);
+            if (!lp) {
+              try { core.addPlayer(sp.name); lp = core.players.find(p => p.name === sp.name); } catch(_) {}
+            }
+            if (lp) {
+              if (typeof sp.health === 'number') lp.health = sp.health;
+              if (typeof sp.energy === 'number') lp.energy = sp.energy;
+              if (typeof sp.isAlive === 'boolean') lp.isAlive = sp.isAlive;
+            }
+          });
+          if (window.debugUI && typeof window.debugUI.updateGameState === 'function') {
+            window.debugUI.updateGameState();
+          }
+        }
+      }
+    });
+
+    // 非房主：收到开始游戏时，直接进入游戏界面
+    sock.off && sock.off('gameStarted');
+    sock.on('gameStarted', () => {
+      if (!LobbyManager.isHost() && typeof window.startGameFromLobby === 'function') {
+        window.startGameFromLobby();
+      }
+    });
+  };
+  LobbyManager.subscribe(tryBind);
+  tryBind();
+
+  // 房主：定期广播状态变化（最小化方案）
+  const broadcastTick = () => {
+    const core = window.game;
+    if (!core || !LobbyManager.connected || !LobbyManager.roomId || !LobbyManager.isHost()) return;
+    const snap = { round: core.currentRound, state: core.gameState, logs: core.logs?.length || 0 };
+    if (snap.round !== lastBroadcast.round || snap.state !== lastBroadcast.state || snap.logs !== lastBroadcast.logs) {
+      // 发送当前状态给其他客户端
+      LobbyManager.socket.emit('roundResolved', LobbyManager.roomId, core.getGameState ? core.getGameState() : {
+        round: core.currentRound,
+        state: core.gameState,
+        logs: core.logs || [],
+        players: core.players.map(p => ({ id: p.id, name: p.name, health: p.health, energy: p.energy, isAlive: p.isAlive }))
+      });
+      lastBroadcast = snap;
+    }
+  };
+  setInterval(broadcastTick, 400);
+})();
+
 // Core game instance shared across scenes
 const gameCore = new Game();
 const debugUI = new DebugUIManager(gameCore);
@@ -27,7 +97,8 @@ window.lobby = LobbyManager; // back-compat for debug panel
 
 const DPR = Math.max(1, window.devicePixelRatio || 1);
 const config = {
-  type: Phaser.AUTO,
+  // Force Canvas renderer to avoid WebGL framebuffer issues on some devices
+  type: Phaser.CANVAS,
   parent: 'game-canvas',
   transparent: true, // canvas sits under DOM UI
   backgroundColor: '#00000000', // fully transparent
@@ -51,6 +122,7 @@ const lobbyScreen = document.getElementById('lobby-screen');
 const startBtn = document.getElementById('start-game-btn');
 const readyBtn = document.getElementById('ready-btn');
 const shareBtn = document.getElementById('share-link-btn');
+const connStatus = document.getElementById('connection-status');
 const playerListEl = document.getElementById('player-list');
 const lobbyStatusEl = document.getElementById('lobby-status');
 const actionBarEl = document.getElementById('action-bar');
@@ -233,9 +305,9 @@ function renderLobby() {
     li.innerHTML = `<span>${p.name}${p.isBot ? ' (虚拟)' : ''}</span><span class="player-status ${p.ready ? 'ready' : ''}">${p.ready ? '已准备' : '未准备'}</span>`;
     playerListEl.appendChild(li);
   });
-  // 根据是否已加入/创建房间控制按钮可用性
-  shareBtn?.toggleAttribute('disabled', !LobbyManager.roomId);
-  readyBtn?.toggleAttribute('disabled', !LobbyManager.roomId);
+  // 按钮状态：仅在已连接且在房间内时可用
+  shareBtn?.toggleAttribute('disabled', !(LobbyManager.roomId && LobbyManager.connected));
+  readyBtn?.toggleAttribute('disabled', !(LobbyManager.roomId && LobbyManager.connected));
   const self = LobbyManager.getSelf?.();
   if (self && readyBtn) {
     readyBtn.textContent = self.ready ? '取消准备' : '准备';
@@ -243,19 +315,59 @@ function renderLobby() {
   }
 
   const allReady = LobbyManager.allReady();
-  lobbyStatusEl.textContent = allReady ? '所有玩家已准备！即将开始...' : '等待所有玩家准备...';
+  lobbyStatusEl.textContent = allReady ? '所有玩家已准备！即将开始...' : (LobbyManager.connected ? '等待所有玩家准备...' : '未连接，无法开始');
   if (allReady) setTimeout(startGame, 600);
 }
 
-startBtn?.addEventListener('click', () => {
-  // 仅在确认名字后才进入房间页
-  openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => {
+// 连接状态文案与“离线房间”入口
+(function bindConnectionUI(){
+  const refresh = () => {
+    if (!connStatus) return;
+    if (LobbyManager.connected) {
+      connStatus.textContent = `已连接：${LobbyManager.socket?.io?.uri || ''}`;
+    } else {
+      connStatus.textContent = '未连接';
+    }
+  };
+  LobbyManager.subscribe(refresh);
+  refresh();
+})();
+
+// 离线房间入口：使用不与分享链接冲突的占位ID
+// [已移除 offline 按钮 UI]
+
+
+startBtn?.addEventListener('click', async () => {
+  const goOnlineFlow = async (playerName) => {
     LobbyManager.createRoom(playerName);
     homeScreen.classList.add('hidden');
     lobbyScreen.classList.remove('hidden');
-  }, () => {
-    // 取消则留在首页
-  });
+  };
+
+  const goOfflineFlow = async (playerName) => {
+    const offlineRoomId = `local-${Date.now().toString(36)}`;
+    LobbyManager.roomId = offlineRoomId;
+    LobbyManager.serverPlayers = [{ id: 'local-self', name: playerName, ready: true }];
+    homeScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('hidden');
+    renderLobby();
+  };
+
+  const askNameThen = (cb) => openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => cb(playerName), () => {});
+
+  if (LobbyManager.connected) {
+    // 已连接：走在线流程
+    askNameThen(goOnlineFlow);
+  } else {
+    // 未连接：弹窗询问是否进入离线模式
+    const ok = await showConfirm('当前未连接服务器，是否进入离线模式？');
+    if (ok) {
+      askNameThen(goOfflineFlow);
+    } else {
+      // 保持在首页，并建议检查网络
+      showToast('已取消进入，建议检查网络连接');
+    }
+  }
 });
 
 readyBtn?.addEventListener('click', () => {
@@ -268,6 +380,9 @@ readyBtn?.addEventListener('click', () => {
 });
 
 shareBtn?.addEventListener('click', () => {
+  if (!(LobbyManager.roomId && LobbyManager.connected)) {
+    return showToast('未连接服务器，无法分享房间');
+  }
   let origin = location.origin;
   // If connected to a remote server, construct the share URL based on the server's hostname.
   // This helps when accessing via localhost on the host machine but connecting to a LAN IP.

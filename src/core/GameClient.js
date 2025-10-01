@@ -29,10 +29,21 @@ export class GameClient {
       this.gameState = 'ended';
       // 处理游戏结束
     });
+
+    // 新增：其他端动作选择广播
+    this.socket.on('actionSelected', ({ playerId, actionKey, targetId, targetName }) => {
+      // 仅主机端负责结算，因此这里只记录/更新 UI 或者交给宿主回合处理器
+      if (window.lobby && typeof window.lobby.isHost === 'function' && window.lobby.isHost()) {
+        // 主机：可以在 CombatManager 中收集并触发结算（此处预留，由 DebugUI/CombatManager 接入）
+        if (window.debugUI && typeof window.debugUI.onRemoteAction === 'function') {
+          window.debugUI.onRemoteAction({ playerId, actionKey, targetId, targetName });
+        }
+      }
+    });
   }
 
-  selectAction(actionKey, targetId) {
-    this.socket.emit('selectAction', this.roomId, actionKey, targetId);
+  selectAction(actionKey, targetName) {
+    this.socket.emit('selectAction', this.roomId, actionKey, targetName);
   }
 
   getGameState() {

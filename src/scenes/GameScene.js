@@ -330,7 +330,8 @@ export class GameScene extends Phaser.Scene {
             me.selectAction(pending.actionKey, target);
             // 同步给可能存在的服务器（占位）
             if (LobbyManager?.socket && LobbyManager?.roomId) {
-                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetPlayer.id);
+                const targetName = target?.name || targetPlayer?.name;
+                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetName);
             }
             if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
                 window.debugUI.updatePlayerList();
@@ -376,7 +377,11 @@ export class GameScene extends Phaser.Scene {
         const recent = logs.slice(-8);
         let offsetY = y + 34;
         recent.forEach(entry => {
-            const line = this.add.text(x + 12, offsetY, `R${entry.round}: ${entry.message}`, {
+            const hasRound = entry && typeof entry === 'object' && entry.round != null;
+            const r = hasRound ? entry.round : '';
+            const msg = (entry && typeof entry === 'object' && entry.message != null) ? String(entry.message) : String(entry);
+            const text = (r === '' ? `${msg}` : `R${r}: ${msg}`);
+            const line = this.add.text(x + 12, offsetY, text, {
                 fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000'
             }).setOrigin(0, 0);
             this.battleLogContainer.add(line);

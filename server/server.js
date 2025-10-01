@@ -34,14 +34,14 @@ io.on('connection', (socket) => {
   socket.on('createRoom', ({ name }) => {
     const roomId = Math.random().toString(36).substring(2, 8);
     rooms[roomId] = { players: [], game: null };
-    
+
     // Add creator as first player
     const player = { id: socket.id, name, ready: false };
     rooms[roomId].players.push(player);
-    
+
     socket.join(roomId);
     socket.emit('roomCreated', roomId);
-    
+
     // Send initial room state
     io.to(roomId).emit('roomState', getRoomState(roomId));
   });
@@ -50,13 +50,13 @@ io.on('connection', (socket) => {
     if (!rooms[roomId]) {
       return socket.emit('error', 'Room not found');
     }
-    
+
     // Check if player is already in room
     if (!rooms[roomId].players.some(p => p.id === socket.id)) {
       const player = { id: socket.id, name, ready: false };
       rooms[roomId].players.push(player);
       socket.join(roomId);
-      
+
       // Send updated room state to all players
       io.to(roomId).emit('roomState', getRoomState(roomId));
     }
@@ -64,19 +64,19 @@ io.on('connection', (socket) => {
 
   socket.on('toggleReady', () => {
     // Find player's room
-    const roomId = Object.keys(rooms).find(id => 
+    const roomId = Object.keys(rooms).find(id =>
       rooms[id].players.some(p => p.id === socket.id)
     );
-    
+
     if (roomId) {
       const player = rooms[roomId].players.find(p => p.id === socket.id);
       if (player) {
         player.ready = !player.ready;
         io.to(roomId).emit('roomState', getRoomState(roomId));
-        
+
         // Check if all players are ready to start
-        const allReady = rooms[roomId].players.length >= 2 && 
-                        rooms[roomId].players.every(p => p.ready);
+        const allReady = rooms[roomId].players.length >= 2 &&
+          rooms[roomId].players.every(p => p.ready);
         if (allReady && !rooms[roomId].game) {
           // 简化：服务端只广播开始游戏事件，不在服务端运行游戏逻辑
           rooms[roomId].game = { started: true };
@@ -90,8 +90,14 @@ io.on('connection', (socket) => {
   socket.on('selectAction', (roomId, actionKey, targetId) => {
     // 在当前架构中，客户端本地模拟战斗逻辑；这里仅占位/日志
     console.log(`[selectAction] room=${roomId} player=${socket.id} action=${actionKey} target=${targetId}`);
-    // 可扩展：将选择广播给房间，或进行校验
-    // io.to(roomId).emit('playerSelectedAction', { playerId: socket.id, actionKey, targetId });
+    // 广播玩家选择给房间内所有成员（用于主机端汇总并结算）
+    io.to(roomId).emit('actionSelected', { playerId: socket.id, actionKey, targetId });
+  });
+
+  // 新增：主机端结算后，将状态通过服务器转发给房间内所有成员
+  socket.on('roundResolved', (roomId, state) => {
+    console.log(`[roundResolved] room=${roomId} by host=${socket.id} round=${state?.round} state=${state?.state}`);
+    io.to(roomId).emit('roundResolved', state || {});
   });
 
   socket.on('disconnect', () => {
@@ -100,10 +106,10 @@ io.on('connection', (socket) => {
     for (let roomId in rooms) {
       const room = rooms[roomId];
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
-      
+
       if (playerIndex !== -1) {
         room.players.splice(playerIndex, 1);
-        
+
         if (room.players.length === 0) {
           // Delete empty rooms
           delete rooms[roomId];
@@ -111,7 +117,7 @@ io.on('connection', (socket) => {
           // Notify remaining players
           io.to(roomId).emit('playerLeft', socket.id);
           io.to(roomId).emit('roomState', getRoomState(roomId));
-          
+
           // End game if too few players
           if (room.game && room.players.length < 2) {
             room.game = null;
