@@ -5,6 +5,6 @@ export class HomeScene extends Phaser.Scene {
 
     create() {
         // UI is entirely handled by HTML overlay
-        console.log('HomeScene is ready. UI is handled by HTML.');
+        // HomeScene ready (UI is HTML-driven)
     }
 }

@@ -47,17 +47,6 @@ export class GameScene extends Phaser.Scene {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000', backgroundColor: '#fff'
         }).setOrigin(0.5).setDepth(20).setVisible(false);
 
-        // Poll to refresh HUD and show chosen actions on resolve
-        this.time.addEvent({
-            delay: 300,
-            loop: true,
-            callback: () => {
-                this.updateHUD();
-                this.updateBattleLogPanel();
-                this.updatePendingHint();
-            }
-        });
-
         // Use LobbyManager's socket and roomId instead of undefined globals
         const socket = LobbyManager.socket;
         const roomId = LobbyManager.roomId || 'default';
@@ -68,7 +57,11 @@ export class GameScene extends Phaser.Scene {
 
         // 新增：结算表现管理器（在 window.game 就绪后挂载）
         const core = this.getCore && this.getCore();
-        if (core && !core.roundResolutionManager) {
+        if (core) {
+            if (core.roundResolutionManager && typeof core.roundResolutionManager.cleanup === 'function') {
+                core.roundResolutionManager.cleanup();
+            }
+            core.roundResolutionManager = null;
             import('../managers/RoundResolutionManager.js').then(mod => {
                 const { RoundResolutionManager } = mod;
                 this.roundResolutionManager = new RoundResolutionManager(core, this);
@@ -205,18 +198,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     handleExitRoom() {
-        console.log('[GameScene] Exiting room...');
+        // exit room (kept minimal logging)
         const socket = LobbyManager.socket;
         const roomId = LobbyManager.roomId;
         if (socket && roomId) {
-            socket.emit('leaveRoom', roomId); // 需确保服务端支持 leaveRoom 或 disconnect 逻辑
-            // 客户端主动清理
-            LobbyManager.roomId = null;
-            LobbyManager.reset();
+            socket.emit('leaveRoom', roomId);
         }
         // 返回大厅
         if (typeof window.returnToLobby === 'function') {
-            window.returnToLobby();
+            window.returnToLobby({ resetRoom: true });
         } else {
             // Fallback
             this.scene.stop();
@@ -227,7 +217,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     handleRematch() {
-        console.log('[GameScene] Requesting rematch...');
+        // request rematch
         const socket = LobbyManager.socket;
         const roomId = LobbyManager.roomId;
         if (socket && roomId) {
@@ -494,13 +484,12 @@ export class GameScene extends Phaser.Scene {
         this.battleLogContainer.removeAll(true);
 
         const { width, height } = this.scale;
-        const panelWidth = 420;
-        const panelHeight = 170;
-        const x = width - panelWidth - 20;
-        // Move panel up to avoid overlapping with Player HUD (height - 80)
-        // Previous: height - panelHeight - 100 -> height - 270 (overlaps with height - 120..-40)
-        // New: height - panelHeight - 160 -> height - 330 (clear of height - 120)
-        const y = height - panelHeight - 160;
+        const panelWidth = Math.min(420, Math.max(240, Math.floor(width * 0.44)));
+        const panelHeight = Math.min(170, Math.max(120, Math.floor(height * 0.28)));
+        const x = width - panelWidth - 16;
+
+        // Prefer high placement so it never collides with bottom action bar on desktop/mobile.
+        const y = 76;
 
         const bg = this.add.rectangle(x, y, panelWidth, panelHeight, 0xffffff, 0.95)
             .setStrokeStyle(3, 0x000000)
@@ -511,7 +500,8 @@ export class GameScene extends Phaser.Scene {
 
         this.battleLogContainer.add([bg, title]);
 
-        const recent = logs.slice(-8);
+        const maxLines = Math.max(4, Math.floor((panelHeight - 38) / 18));
+        const recent = logs.slice(-maxLines);
         let offsetY = y + 34;
         recent.forEach(entry => {
             const hasRound = entry && typeof entry === 'object' && entry.round != null;

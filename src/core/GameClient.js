@@ -12,6 +12,11 @@ export class GameClient {
   }
 
   setupListeners() {
+    if (!this.socket || typeof this.socket.on !== 'function') {
+      console.warn('[GameClient] Socket unavailable, skipping listener binding.');
+      return;
+    }
+
     this.socket.on('gameStarted', () => {
       this.gameState = 'selecting';
       // 更新UI
@@ -31,11 +36,10 @@ export class GameClient {
     });
 
     this.socket.on('rematchStarted', () => {
-      console.log('[GameClient] Rematch started, resetting state...');
+      // reset quietly on rematch
       this.gameState = 'idle';
       this.currentRound = 0;
       this.logs = [];
-      // 可以在此处重置本地玩家状态，或者等待新的 roomState
     });
 
     // 新增：其他端动作选择广播
@@ -51,6 +55,7 @@ export class GameClient {
   }
 
   selectAction(actionKey, targetName) {
+    if (!this.socket || typeof this.socket.emit !== 'function') return;
     this.socket.emit('selectAction', this.roomId, actionKey, targetName);
   }
 

@@ -24,19 +24,20 @@ export class DebugUIManager {
       window.resolveNow = async () => { if (this.game?.processRound) await this.game.processRound(); };
       // 非房主也允许手动触发一次结算（仅本地显示，不广播）
       window.resolveLocal = async () => { if (this.game?.processRound) await this.game.processRound(); };
-      
+
       // Listen for Ctrl+Shift+D
       document.addEventListener('keydown', (e) => {
-          if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
-              e.preventDefault();
-              this.toggleVisibility();
-          }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+          e.preventDefault();
+          this.toggleVisibility();
+        }
       });
     }
   }
 
   updateVisibility() {
-    const shouldShow = this.forcedVisible || (!!LobbyManager.roomId && LobbyManager.isHost());
+    const isHost = !!LobbyManager.roomId && LobbyManager.isHost();
+    const shouldShow = isHost;
     this.visible = shouldShow;
     const panel = document.getElementById('debug-panel');
     if (panel) {
@@ -45,9 +46,10 @@ export class DebugUIManager {
   }
 
   toggleVisibility() {
+    if (!(!!LobbyManager.roomId && LobbyManager.isHost())) return;
     this.forcedVisible = !this.forcedVisible;
     this.updateVisibility();
-    console.log(`Debug Panel ${this.forcedVisible ? 'Shown' : 'Hidden'}`);
+    // debug visibility toggled
   }
 
   setAutoResolve(val) {
@@ -81,37 +83,37 @@ export class DebugUIManager {
     if (resolveBtn) {
       resolveBtn.onclick = async () => { if (this.game?.processRound) await this.game.processRound(); };
     }
-    
+
     // Player Stats Adjustment
     const setBtn = document.getElementById('debug-set-btn');
     if (setBtn) {
-        setBtn.onclick = () => {
-            const pidInput = document.getElementById('debug-pid');
-            const propInput = document.getElementById('debug-prop');
-            const valInput = document.getElementById('debug-val');
-            
-            if (!pidInput || !propInput || !valInput) return;
-            
-            const pid = parseInt(pidInput.value);
-            const prop = propInput.value;
-            const val = parseInt(valInput.value);
-            
-            if (isNaN(pid) || isNaN(val)) {
-                alert('请输入有效的ID和数值');
-                return;
-            }
-            
-            const player = this.game.players.find(p => p.id === pid);
-            if (player) {
-                if (prop === 'health') player.health = val;
-                if (prop === 'energy') player.energy = val;
-                // Force update
-                this.game.nextFrame();
-                if (typeof window.showToast === 'function') window.showToast(`已更新玩家 ${player.name} ${prop} = ${val}`);
-            } else {
-                alert('未找到该ID的玩家');
-            }
-        };
+      setBtn.onclick = () => {
+        const pidInput = document.getElementById('debug-pid');
+        const propInput = document.getElementById('debug-prop');
+        const valInput = document.getElementById('debug-val');
+
+        if (!pidInput || !propInput || !valInput) return;
+
+        const pid = parseInt(pidInput.value);
+        const prop = propInput.value;
+        const val = parseInt(valInput.value);
+
+        if (isNaN(pid) || isNaN(val)) {
+          alert('请输入有效的ID和数值');
+          return;
+        }
+
+        const player = this.game.players.find(p => p.id === pid);
+        if (player) {
+          if (prop === 'health') player.health = val;
+          if (prop === 'energy') player.energy = val;
+          // Force update
+          this.game.nextFrame();
+          if (typeof window.showToast === 'function') window.showToast(`已更新玩家 ${player.name} ${prop} = ${val}`);
+        } else {
+          alert('未找到该ID的玩家');
+        }
+      };
     }
   }
 
@@ -125,11 +127,7 @@ export class DebugUIManager {
 
   // Hook: host collects remote actions to drive resolution
   onRemoteAction(payload) {
-    // 可在此处接入 CombatManager/RoundResolutionManager
-    // 目前仅记录日志
-    if (window && typeof window.console !== 'undefined') {
-      console.log('[DebugUI] remote action', payload);
-    }
+    // reserved hook for host to collect remote actions; do not log frequently
   }
 }
 

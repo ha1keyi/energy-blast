@@ -36,7 +36,8 @@ body {
   inset: 0;
   z-index: 20;
   pointer-events: none;
-  display: block; /* 不依赖 flex 居中，改为由 #ui-container 自行居中 */
+  display: block;
+  /* 不依赖 flex 居中，改为由 #ui-container 自行居中 */
 }
 
 #ui-layer .interactive {
@@ -156,8 +157,12 @@ button:active {
   border: 3px solid #222;
   border-radius: 14px;
   box-shadow: 6px 6px 0 #222;
-  flex-direction: column; /* 居中布局：状态在上，操作按钮在下 */
-  text-align: center; /* 文本居中 */
+  flex-direction: column;
+  /* 居中布局：状态在上，操作按钮在下 */
+  text-align: center;
+  /* 文本居中 */
+  max-height: 42vh;
+  overflow: auto;
 }
 
 /* 操作按钮行容器：保持横向排列与居中 */
@@ -175,9 +180,11 @@ button:active {
   font-family: 'ZCOOL KuaiLe, sans-serif';
   color: #111;
 }
+
 .action-bar-header {
   font-size: 16px;
 }
+
 .action-bar-status {
   font-size: 14px;
 }
@@ -267,4 +274,55 @@ button:active {
 
 #game-logs div:last-child {
   border-bottom: none;
+}
+
+@media (max-width: 768px) {
+  body {
+    overflow: hidden;
+  }
+
+  #ui-container {
+    width: calc(100% - 24px);
+    padding: 22px;
+    transform: translate(-50%, -50%);
+  }
+
+  #action-bar {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .action-bar-header {
+    font-size: 13px;
+  }
+
+  .action-bar-status {
+    font-size: 12px;
+  }
+
+  .action-buttons {
+    gap: 8px;
+  }
+
+  .action-btn {
+    width: 74px;
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .action-btn img {
+    width: 40px;
+    height: 40px;
+  }
+
+  .action-btn span {
+    font-size: 11px;
+  }
+
+  .action-btn em.energy {
+    font-size: 10px;
+  }
 }

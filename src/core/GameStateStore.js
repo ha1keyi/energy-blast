@@ -80,6 +80,7 @@ export class GameStateStore {
     const localByName = new Map(core.players.map(p => [p.name, p]));
     const localById = new Map(core.players.map(p => [p.id, p]));
     if (Array.isArray(snap.players)) {
+      const pendingTargets = [];
       snap.players.forEach(sp => {
         let lp = null;
         if (sp && typeof sp === 'object') {
@@ -92,8 +93,29 @@ export class GameStateStore {
             if (typeof sp.health === 'number') lp.health = sp.health;
             if (typeof sp.energy === 'number') lp.energy = sp.energy;
             if (typeof sp.isAlive === 'boolean') lp.isAlive = sp.isAlive;
+            lp.isBot = !!sp.isBot;
+
+            // Keep action details for remote animation rendering.
+            if (sp.currentAction && typeof sp.currentAction === 'object') {
+              lp.currentAction = { ...sp.currentAction };
+            } else {
+              lp.currentAction = null;
+            }
+
+            pendingTargets.push({
+              player: lp,
+              targetId: sp.targetId,
+              targetName: sp.targetName,
+            });
           }
         }
+      });
+
+      pendingTargets.forEach(({ player, targetId, targetName }) => {
+        let target = null;
+        if (targetId != null) target = core.players.find(p => p.id === targetId) || null;
+        if (!target && targetName) target = core.players.find(p => p.name === targetName) || null;
+        player.target = target;
       });
     }
 

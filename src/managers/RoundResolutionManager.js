@@ -43,6 +43,12 @@ export class RoundResolutionManager {
     // 如果 resolving 期间没有构建（比如直接结束），这里可以构建
     if (this.sprites.length === 0 && core.gameState === 'resolving') {
       this.buildSprites();
+    } else if (core.gameState === 'resolving' && this.sprites.length > 0) {
+      // Rebuild once per resolve step when actions changed.
+      const hasAnyAction = (core.players || []).some(p => !!p.currentAction);
+      if (!hasAnyAction) {
+        this.clearSprites();
+      }
     }
   }
 
@@ -65,6 +71,7 @@ export class RoundResolutionManager {
     const positions = this.computePositions(others.length, width, height);
 
     // Opponents' action icons
+    const tinyEnemyMarkers = [];
     others.forEach((p, i) => {
       if (i >= positions.length) return;
       const action = p.currentAction;
@@ -72,13 +79,14 @@ export class RoundResolutionManager {
       if (!key) return;
       const pos = positions[i];
       const sprite = this.scene.add.image(pos.x, pos.y, key)
-        .setDisplaySize(64, 64)
+        .setDisplaySize(50, 50)
         .setDepth(12)
         .setOrigin(0.5)
         .setAlpha(0)
         .setScale(0.85);
       this.sprites.push(sprite);
       this.scene.tweens.add({ targets: sprite, alpha: 1, scale: 1, duration: 180, ease: 'Quad.easeOut' });
+      tinyEnemyMarkers.push({ key, idx: i });
 
       // 添加黑白手绘风格特效
       this.playActionEffect(p, pos.x, pos.y);
@@ -92,13 +100,30 @@ export class RoundResolutionManager {
         const sx = width / 2;
         const sy = Math.max(100, height - 160);
         const sprite = this.scene.add.image(sx, sy, key)
-          .setDisplaySize(72, 72)
+          .setDisplaySize(58, 58)
           .setDepth(13)
           .setOrigin(0.5)
           .setAlpha(0)
           .setScale(0.85);
         this.sprites.push(sprite);
         this.scene.tweens.add({ targets: sprite, alpha: 1, scale: 1, duration: 180, ease: 'Quad.easeOut' });
+
+        // Overlay tiny enemy action markers above self icon to make opponents' actions always visible.
+        const markerCount = Math.min(4, tinyEnemyMarkers.length);
+        for (let i = 0; i < markerCount; i++) {
+          const marker = tinyEnemyMarkers[i];
+          const spacing = 22;
+          const mx = sx + (i - (markerCount - 1) / 2) * spacing;
+          const my = sy - 52;
+          const tiny = this.scene.add.image(mx, my, marker.key)
+            .setDisplaySize(24, 24)
+            .setDepth(14)
+            .setOrigin(0.5)
+            .setAlpha(0)
+            .setScale(0.9);
+          this.sprites.push(tiny);
+          this.scene.tweens.add({ targets: tiny, alpha: 1, scale: 1, duration: 140, ease: 'Quad.easeOut', delay: i * 40 });
+        }
 
         // 添加黑白手绘风格特效
         this.playActionEffect(self, sx, sy);
@@ -152,13 +177,13 @@ export class RoundResolutionManager {
   }
 
   createLineBlast(x1, y1, x2, y2) {
-    const graphics = this.scene.add.graphics().setDepth(15);
     const lineCount = 5;
 
     for (let i = 0; i < lineCount; i++) {
       this.scene.time.addEvent({
         delay: i * 50,
         callback: () => {
+          const graphics = this.scene.add.graphics().setDepth(15);
           graphics.lineStyle(2, 0x000000, 1);
           // 稍微随机化线条位置，模拟手绘感
           const ox = (Math.random() - 0.5) * 20;
@@ -188,7 +213,7 @@ export class RoundResolutionManager {
       const radius = 40 + i * 5;
       graphics.beginPath();
       for (let angle = 0; angle < 360; angle += 10) {
-        const rad = Phaser.Math.DegToRad(angle);
+        const rad = angle * (Math.PI / 180);
         const r = radius + (Math.random() - 0.5) * 10;
         const px = x + Math.cos(rad) * r;
         const py = y + Math.sin(rad) * r;

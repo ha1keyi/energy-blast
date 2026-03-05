@@ -7,6 +7,7 @@ import { ActionType } from '../core/enums/ActionType.js';
 export class CombatManager {
   constructor(game) {
     this.game = game;
+    this.resolveDisplayMs = 900;
   }
 
   // Process one round: validate selections, resolve interactions, update energy/health, advance round/state
@@ -28,12 +29,19 @@ export class CombatManager {
     players.forEach(p => {
       if (!p.currentAction) {
         try {
-          console.log(`[Combat] Player ${p.name} has no action, defaulting to STORE_1`);
+          // default silently to STORE_1 to keep flow smooth
           p.selectAction('STORE_1', null);
         } catch (e) {
-          console.warn(`[Combat] Failed to set default action for ${p.name}:`, e);
+          console.warn('[Combat] Failed to set default action for', p.name);
         }
       }
+    });
+
+    // Log each player's selected action for the battle log panel.
+    players.forEach(p => {
+      const actionName = p.currentAction?.name || '储气';
+      const targetName = p.target?.name ? ` -> ${p.target.name}` : '';
+      core.addLog(`${p.name} 选择了 ${actionName}${targetName}`);
     });
 
     // Pairwise resolution: for each attacker with ATTACK target, resolve against target's action via strategy
@@ -43,7 +51,7 @@ export class CombatManager {
       if (attacker.currentAction.type === ActionType.ATTACK) {
         const target = attacker.target;
         // Debug log
-        console.log(`[Combat] ${attacker.name} attacking ${target?.name || 'null'} (target type: ${typeof target})`);
+        // attack resolution (no verbose log)
 
         if (target && typeof target === 'object' && target.isAlive) {
           const strategy = StrategyFactory.getStrategyForActions(attacker.currentAction, target.currentAction);
@@ -55,21 +63,33 @@ export class CombatManager {
       }
     });
 
-    // Post-resolution: adjust energy, clear selections
+    // Post-resolution: adjust energy, keep selected actions for a short resolving window.
     players.forEach(p => {
       try { p.adjustEnergy(); } catch (_) { }
-      p.resetRound?.();
     });
 
     // Append logs to core
     logs.forEach(msg => core.addLog(msg));
 
-    // Check end
-    if (core.checkGameEnd()) {
-      // Sync final snapshot
+    // If this round can end the game, keep resolving visuals visible for a short beat.
+    const willEnd = core.getAlivePlayers().length <= 1;
+    if (willEnd) {
+      await new Promise(resolve => {
+        setTimeout(resolve, this.resolveDisplayMs);
+      });
+      core.checkGameEnd();
       core.store?.updateState(core.getGameState());
       return;
     }
+
+    // Keep resolving state visible to ensure animation managers can render effects.
+    await new Promise(resolve => {
+      setTimeout(resolve, this.resolveDisplayMs);
+    });
+
+    players.forEach(p => {
+      p.resetRound?.();
+    });
 
     // Prepare next round
     core.prepareNextRound();
