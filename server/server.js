@@ -122,6 +122,27 @@ io.on('connection', (socket) => {
     // Update server-side state cache if needed (omitted for now as we rely on host)
   });
 
+  socket.on('requestRematch', (roomId) => {
+    console.log(`[requestRematch] room=${roomId} by ${socket.id}`);
+    const room = rooms[roomId];
+    if (room) {
+      // 重置房间游戏状态
+      room.game = null;
+      // 重置所有玩家状态
+      room.players.forEach(p => {
+        p.ready = false;
+        // 重置游戏内属性（如果需要同步给客户端）
+        p.health = 1; // 初始血量
+        p.energy = 0; // 初始气量
+        p.isAlive = true;
+      });
+
+      // 通知房间内所有玩家回到准备状态
+      io.to(roomId).emit('rematchStarted');
+      io.to(roomId).emit('roomState', getRoomState(roomId));
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     // Find and clean up rooms where the player was

@@ -28,15 +28,22 @@ export class RoundResolutionManager {
     const core = this.core;
     if (!core || !this._active) return;
 
-    const shouldShow = core.gameState === 'resolving';
+    // 当游戏结束时，确保已生成的特效不会被立即清除，
+    // 而是允许它们自然播放完毕（通过 tween 或 timer）。
+    // 只有当进入 idle/selecting 状态时才强制清理。
+    const shouldShow = (core.gameState === 'resolving' || core.gameState === 'ended');
     if (!shouldShow) {
-      // Hide when not resolving
+      // Hide when not resolving or ended
       if (this.sprites.length) this.clearSprites();
       return;
     }
 
     // Only build if not already built for this resolution step
-    if (this.sprites.length === 0) this.buildSprites();
+    // 注意：如果是 ended 状态，通常是在 resolving 之后，所以 sprite 应该已经存在
+    // 如果 resolving 期间没有构建（比如直接结束），这里可以构建
+    if (this.sprites.length === 0 && core.gameState === 'resolving') {
+      this.buildSprites();
+    }
   }
 
   clearSprites() {
@@ -72,6 +79,9 @@ export class RoundResolutionManager {
         .setScale(0.85);
       this.sprites.push(sprite);
       this.scene.tweens.add({ targets: sprite, alpha: 1, scale: 1, duration: 180, ease: 'Quad.easeOut' });
+
+      // 添加黑白手绘风格特效
+      this.playActionEffect(p, pos.x, pos.y);
     });
 
     // Self action icon (near bottom center)
@@ -89,7 +99,132 @@ export class RoundResolutionManager {
           .setScale(0.85);
         this.sprites.push(sprite);
         this.scene.tweens.add({ targets: sprite, alpha: 1, scale: 1, duration: 180, ease: 'Quad.easeOut' });
+
+        // 添加黑白手绘风格特效
+        this.playActionEffect(self, sx, sy);
       }
+    }
+  }
+
+  // 播放黑白手绘风格特效
+  playActionEffect(player, x, y) {
+    const action = player.currentAction;
+    if (!action) return;
+
+    const { width, height } = this.scene.scale;
+    const type = action.type;
+
+    if (type === 'ATTACK') {
+      // 攻击特效：黑白线条冲击波
+      const target = player.target;
+      if (target) {
+        // 找到目标的位置（如果是自己，在底部；如果是别人，在 positions 中）
+        const targetPos = this.getPlayerPosition(target);
+        if (targetPos) {
+          this.createLineBlast(x, y, targetPos.x, targetPos.y);
+        }
+      }
+    } else if (type === 'DEFEND' || type === 'REBOUND') {
+      // 防御/反弹特效：手绘圆圈盾牌
+      this.createSketchShield(x, y);
+    } else if (action.energyGain > 0) {
+      // 储气特效：向上升起的线条
+      this.createEnergyRise(x, y);
+    }
+  }
+
+  getPlayerPosition(player) {
+    const core = this.core;
+    const players = core.players || [];
+    const selfId = (window && window.localPlayerId) || (players[0]?.id);
+    const { width, height } = this.scene.scale;
+
+    if (player.id === selfId) {
+      return { x: width / 2, y: height - 80 };
+    }
+
+    const others = players.filter(p => p.id !== selfId);
+    const idx = others.findIndex(p => p.id === player.id);
+    if (idx === -1) return null;
+
+    const positions = this.computePositions(others.length, width, height);
+    return positions[idx] || null;
+  }
+
+  createLineBlast(x1, y1, x2, y2) {
+    const graphics = this.scene.add.graphics().setDepth(15);
+    const lineCount = 5;
+
+    for (let i = 0; i < lineCount; i++) {
+      this.scene.time.addEvent({
+        delay: i * 50,
+        callback: () => {
+          graphics.lineStyle(2, 0x000000, 1);
+          // 稍微随机化线条位置，模拟手绘感
+          const ox = (Math.random() - 0.5) * 20;
+          const oy = (Math.random() - 0.5) * 20;
+          graphics.beginPath();
+          graphics.moveTo(x1 + ox, y1 + oy);
+          graphics.lineTo(x2 + ox, y2 + oy);
+          graphics.strokePath();
+
+          this.scene.tweens.add({
+            targets: graphics,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => graphics.destroy()
+          });
+        }
+      });
+    }
+  }
+
+  createSketchShield(x, y) {
+    const graphics = this.scene.add.graphics().setDepth(15);
+    graphics.lineStyle(3, 0x000000, 1);
+
+    // 绘制多个不规则圆圈模拟手绘盾牌
+    for (let i = 0; i < 3; i++) {
+      const radius = 40 + i * 5;
+      graphics.beginPath();
+      for (let angle = 0; angle < 360; angle += 10) {
+        const rad = Phaser.Math.DegToRad(angle);
+        const r = radius + (Math.random() - 0.5) * 10;
+        const px = x + Math.cos(rad) * r;
+        const py = y + Math.sin(rad) * r;
+        if (angle === 0) graphics.moveTo(px, py);
+        else graphics.lineTo(px, py);
+      }
+      graphics.closePath();
+      graphics.strokePath();
+    }
+
+    this.scene.tweens.add({
+      targets: graphics,
+      alpha: 0,
+      scale: 1.2,
+      duration: 500,
+      onComplete: () => graphics.destroy()
+    });
+  }
+
+  createEnergyRise(x, y) {
+    for (let i = 0; i < 8; i++) {
+      const line = this.scene.add.line(
+        x + (Math.random() - 0.5) * 40,
+        y,
+        0, 0, 0, -20,
+        0x000000
+      ).setDepth(15).setLineWidth(2);
+
+      this.scene.tweens.add({
+        targets: line,
+        y: y - 50,
+        alpha: 0,
+        duration: 600,
+        delay: Math.random() * 300,
+        onComplete: () => line.destroy()
+      });
     }
   }
 
