@@ -30,6 +30,14 @@ export class GameClient {
       // 处理游戏结束
     });
 
+    this.socket.on('rematchStarted', () => {
+      console.log('[GameClient] Rematch started, resetting state...');
+      this.gameState = 'idle';
+      this.currentRound = 0;
+      this.logs = [];
+      // 可以在此处重置本地玩家状态，或者等待新的 roomState
+    });
+
     // 新增：其他端动作选择广播
     this.socket.on('actionSelected', ({ playerId, actionKey, targetId, targetName }) => {
       // 仅主机端负责结算，因此这里只记录/更新 UI 或者交给宿主回合处理器

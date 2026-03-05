@@ -82,6 +82,9 @@ export class GameScene extends Phaser.Scene {
         this.battleLogContainer = this.add.container(0, 0).setDepth(25);
         this._lastLogCount = 0;
 
+        // 初始化结算画面容器
+        this.endScreenContainer = this.add.container(0, 0).setDepth(100).setVisible(false);
+
         // 去重：仅保留一个定时器轮询 HUD / 日志 / 待选提示
         this.time.addEvent({
             delay: 300,
@@ -91,6 +94,7 @@ export class GameScene extends Phaser.Scene {
                 // 动作图标+文本由 RoundResolutionManager 管理
                 this.updateBattleLogPanel();
                 this.updatePendingHint();
+                this.updateEndScreen();
             }
         });
     }
@@ -102,6 +106,136 @@ export class GameScene extends Phaser.Scene {
     updatePendingHint() {
         const show = !!window.pendingAttack && this.getCore()?.gameState === 'selecting';
         this.pendingHint?.setVisible(show);
+    }
+
+    // 渲染游戏结束结算画面
+    updateEndScreen() {
+        const core = this.getCore();
+        if (!core || core.gameState !== 'ended') {
+            this.endScreenContainer?.setVisible(false);
+            return;
+        }
+
+        if (this.endScreenContainer.visible) return; // 已经显示了
+
+        const { width, height } = this.scale;
+        this.endScreenContainer.removeAll(true);
+        this.endScreenContainer.setVisible(true);
+
+        // 半透明背景
+        const overlay = this.add.rectangle(0, 0, width, height, 0xffffff, 0.8).setOrigin(0, 0);
+
+        // 结算框（手绘风格）
+        const boxW = 500, boxH = 300;
+        const boxX = width / 2, boxY = height / 2;
+
+        const graphics = this.add.graphics();
+        graphics.lineStyle(4, 0x000000, 1);
+        graphics.fillStyle(0xffffff, 1);
+
+        // 绘制带抖动手绘感的矩形
+        const points = [
+            { x: boxX - boxW / 2, y: boxY - boxH / 2 },
+            { x: boxX + boxW / 2, y: boxY - boxH / 2 },
+            { x: boxX + boxW / 2, y: boxY + boxH / 2 },
+            { x: boxX - boxW / 2, y: boxY + boxH / 2 }
+        ];
+
+        graphics.beginPath();
+        graphics.moveTo(points[0].x + (Math.random() - 0.5) * 5, points[0].y + (Math.random() - 0.5) * 5);
+        for (let i = 1; i <= points.length; i++) {
+            const p = points[i % points.length];
+            graphics.lineTo(p.x + (Math.random() - 0.5) * 5, p.y + (Math.random() - 0.5) * 5);
+        }
+        graphics.closePath();
+        graphics.fillPath();
+        graphics.strokePath();
+
+        const titleText = core.getAlivePlayers().length === 1 ? '胜 负 已 分' : '同 归 于 尽';
+        const title = this.add.text(boxX, boxY - 100, titleText, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '40px', color: '#000'
+        }).setOrigin(0.5);
+
+        const winner = core.getAlivePlayers()[0];
+        const resultText = winner ? `获胜者: ${winner.name}` : '没有活下来的玩家';
+        const result = this.add.text(boxX, boxY - 20, resultText, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '24px', color: '#000'
+        }).setOrigin(0.5);
+
+        const btnW = 160, btnH = 50;
+        const btnX = boxX, btnY = boxY + 80;
+
+        // “再来一局”按钮（手绘风格）
+        const rematchBtn = this.createHandDrawnButton(btnX - 90, btnY, btnW, btnH, '再来一局', () => this.handleRematch());
+
+        // “退出房间”按钮（手绘风格）
+        const exitBtn = this.createHandDrawnButton(btnX + 90, btnY, btnW, btnH, '退出房间', () => this.handleExitRoom());
+
+        this.endScreenContainer.add([overlay, graphics, title, result, ...rematchBtn, ...exitBtn]);
+
+        // 入场动画
+        this.endScreenContainer.setAlpha(0);
+        this.scene.tweens.add({
+            targets: this.endScreenContainer,
+            alpha: 1,
+            duration: 500,
+            ease: 'Power2'
+        });
+
+        // 自动超时保护：5秒后若无操作，提示或执行默认行为（这里仅作为保护，不强制退出）
+        // 如果需要强制返回，可以在这里添加 delayedCall
+    }
+
+    createHandDrawnButton(x, y, w, h, text, onClick) {
+        // 使用Container组合，便于事件处理和层级
+        const container = this.add.container(x, y);
+        // 背景，基于中心点定位，传入的x,y是中心点
+        // 注意：add.rectangle默认Origin是0.5, 0.5
+        const bg = this.add.rectangle(0, 0, w, h, 0xffffff, 1).setStrokeStyle(3, 0x000000).setInteractive({ cursor: 'pointer' });
+        const label = this.add.text(0, 0, text, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '20px', color: '#000'
+        }).setOrigin(0.5);
+
+        bg.on('pointerover', () => { bg.setFillStyle(0xeeeeee, 1); });
+        bg.on('pointerout', () => { bg.setFillStyle(0xffffff, 1); });
+        bg.on('pointerdown', onClick);
+
+        container.add([bg, label]);
+        return [container];
+    }
+
+    handleExitRoom() {
+        console.log('[GameScene] Exiting room...');
+        const socket = LobbyManager.socket;
+        const roomId = LobbyManager.roomId;
+        if (socket && roomId) {
+            socket.emit('leaveRoom', roomId); // 需确保服务端支持 leaveRoom 或 disconnect 逻辑
+            // 客户端主动清理
+            LobbyManager.roomId = null;
+            LobbyManager.reset();
+        }
+        // 返回大厅
+        if (typeof window.returnToLobby === 'function') {
+            window.returnToLobby();
+        } else {
+            // Fallback
+            this.scene.stop();
+            document.getElementById('home-screen')?.classList.remove('hidden');
+            document.getElementById('lobby-screen')?.classList.add('hidden');
+            document.getElementById('ui-container')?.classList.add('hidden');
+        }
+    }
+
+    handleRematch() {
+        console.log('[GameScene] Requesting rematch...');
+        const socket = LobbyManager.socket;
+        const roomId = LobbyManager.roomId;
+        if (socket && roomId) {
+            socket.emit('requestRematch', roomId);
+        } else {
+            // 本地模式重置
+            this.getCore()?.startGame();
+        }
     }
 
     // 统一的对手分布：在左/右边框的上75%区域，以及上边框内均匀分布

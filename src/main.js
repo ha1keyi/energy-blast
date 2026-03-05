@@ -61,20 +61,20 @@ LobbyManager.connect();
         const core = window.game;
         const player = core.players.find(p => p.id === playerId);
         if (player) {
-            let target = null;
-            if (targetId) {
-                // Try finding by ID first, then name
-                target = core.players.find(p => p.id === targetId || p.name === targetId);
+          let target = null;
+          if (targetId) {
+            // Try finding by ID first, then name
+            target = core.players.find(p => p.id === targetId || p.name === targetId);
+          }
+          try {
+            player.selectAction(actionKey, target);
+            console.log(`[Host] Synced action for ${player.name}: ${actionKey} -> ${target?.name}`);
+            if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
+              window.debugUI.updatePlayerList();
             }
-            try {
-                player.selectAction(actionKey, target);
-                console.log(`[Host] Synced action for ${player.name}: ${actionKey} -> ${target?.name}`);
-                if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
-                    window.debugUI.updatePlayerList();
-                }
-            } catch (e) {
-                console.warn('[Host] Failed to sync action:', e);
-            }
+          } catch (e) {
+            console.warn('[Host] Failed to sync action:', e);
+          }
         }
       }
     });
@@ -84,6 +84,31 @@ LobbyManager.connect();
     sock.on('gameStarted', () => {
       if (!LobbyManager.isHost() && typeof window.startGameFromLobby === 'function') {
         window.startGameFromLobby();
+      }
+    });
+
+    // 收到再来一局通知
+    sock.on('rematchStarted', () => {
+      console.log('[Network] Rematch received, returning to lobby...');
+      if (window.game) {
+        window.game.isRunning = false;
+        window.game.gameState = 'idle';
+        window.game.currentRound = 0;
+        window.game.logs = [];
+        if (window.game.store) window.game.store.clearLogs();
+      }
+      // 切换到大厅界面
+      const homeScreen = document.getElementById('home-screen');
+      const lobbyScreen = document.getElementById('lobby-screen');
+      const uiContainer = document.getElementById('ui-container');
+
+      if (uiContainer) uiContainer.classList.remove('hidden');
+      if (homeScreen) homeScreen.classList.add('hidden');
+      if (lobbyScreen) lobbyScreen.classList.remove('hidden');
+
+      // 停止 Phaser 场景
+      if (window.phaserGame && window.phaserGame.scene.isActive('GameScene')) {
+        window.phaserGame.scene.stop('GameScene');
       }
     });
   };
@@ -389,9 +414,40 @@ function renderLobby() {
   }
 
   const allReady = LobbyManager.allReady();
-  lobbyStatusEl.textContent = allReady ? '所有玩家已准备！即将开始...' : (LobbyManager.connected ? '等待所有玩家准备...' : '未连接，无法开始');
-  // 仅房主触发开始，避免非房主重复开始导致两次“开始”日志
-  if (allReady && (LobbyManager.isHost && LobbyManager.isHost())) setTimeout(startGame, 600);
+  const isHost = LobbyManager.isHost && LobbyManager.isHost();
+
+  // 清除旧的动态按钮（防止重复或状态不一致）
+  const oldBtn = document.getElementById('start-game-btn-active');
+  if (oldBtn) oldBtn.remove();
+
+  if (allReady) {
+    if (isHost) {
+      lobbyStatusEl.textContent = '所有玩家已准备！等待房主开始...';
+      // 创建“开始游戏”按钮
+      const btn = document.createElement('button');
+      btn.id = 'start-game-btn-active';
+      btn.textContent = '开始游戏';
+      // 使用与现有交互按钮一致的样式类
+      btn.className = 'interactive';
+      btn.style.cssText = 'background-color: #2ecc71; color: white; border: none; margin-left: 10px;';
+
+      btn.onclick = () => {
+        // 二次检查状态
+        if (!LobbyManager.allReady()) return showToast('有玩家取消了准备');
+        startGame();
+        btn.remove();
+      };
+
+      // 插入到准备按钮之后
+      if (readyBtn && readyBtn.parentNode) {
+        readyBtn.parentNode.insertBefore(btn, readyBtn.nextSibling);
+      }
+    } else {
+      lobbyStatusEl.textContent = '等待房主开始游戏...';
+    }
+  } else {
+    lobbyStatusEl.textContent = LobbyManager.connected ? '等待所有玩家准备...' : '未连接，无法开始';
+  }
 }
 
 // 连接状态文案与“离线房间”入口
@@ -459,9 +515,11 @@ shareBtn?.addEventListener('click', () => {
     return showToast('未连接服务器，无法分享房间');
   }
   let origin = location.origin;
-  // If connected to a remote server, construct the share URL based on the server's hostname.
-  // This helps when accessing via localhost on the host machine but connecting to a LAN IP.
-  if (LobbyManager.socket && LobbyManager.connected) {
+  // If we're on ngrok, just use the current origin.
+  // Otherwise, fallback to the socket hostname logic for local network.
+  const isNgrok = location.hostname.endsWith('ngrok-free.dev') || location.hostname.endsWith('ngrok.io');
+  
+  if (!isNgrok && LobbyManager.socket && LobbyManager.connected) {
     try {
       const socketUrl = new URL(LobbyManager.socket.io.uri);
       // Use the socket's hostname if it's a proper network IP
@@ -525,15 +583,16 @@ function startGame() {
     // Game over -> return to lobby UI
     if (gameCore.gameState === 'ended') {
       window.pendingAttack = null;
-      document.getElementById('ui-container')?.classList.remove('hidden');
-      homeScreen?.classList.add('hidden');
-      lobbyScreen?.classList.remove('hidden');
+      // 不再自动隐藏 Phaser 场景和 UI，以便显示结算画面
+      // document.getElementById('ui-container')?.classList.remove('hidden');
+      // homeScreen?.classList.add('hidden');
+      // lobbyScreen?.classList.remove('hidden');
       // Update lobby status
-      if (lobbyStatusEl) lobbyStatusEl.textContent = '游戏结束，等待所有玩家准备…';
+      // if (lobbyStatusEl) lobbyStatusEl.textContent = '游戏结束，等待所有玩家准备…';
       // Stop scene
-      if (phaserGame.scene.isActive('GameScene')) phaserGame.scene.stop('GameScene');
+      // if (phaserGame.scene.isActive('GameScene')) phaserGame.scene.stop('GameScene');
       // stop polling
-      if (gameSyncIntervalId) { clearInterval(gameSyncIntervalId); gameSyncIntervalId = null; }
+      // if (gameSyncIntervalId) { clearInterval(gameSyncIntervalId); gameSyncIntervalId = null; }
     }
   };
   // Observe game state via polling simple interval (Dev)
