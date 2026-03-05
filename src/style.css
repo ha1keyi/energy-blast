@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
+
 /* src/style.css */
 * {
   margin: 0;
@@ -5,19 +7,228 @@
   box-sizing: border-box;
 }
 
+/* 手绘黑白主题 */
+
 body {
-  font-family: Arial, sans-serif;
-  background: #000;
+  font-family: 'ZCOOL KuaiLe', cursive, Arial, sans-serif;
+  background-color: #fff;
+  /* 简单手绘格纹背景 */
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23222' fill-opacity='0.08'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  color: #222;
+  /* Allow natural scroll if needed to avoid forced CSS scaling */
   overflow: hidden;
 }
 
 #app {
+  position: relative;
   width: 100vw;
   height: 100vh;
+}
+
+#game-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+}
+
+#ui-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  display: block;
+  /* 不依赖 flex 居中，改为由 #ui-container 自行居中 */
+}
+
+#ui-layer .interactive {
+  pointer-events: auto;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* UI 容器（手绘描边卡片） */
+#ui-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  text-align: center;
+  background: #fff;
+  padding: 40px;
+  border: 3px solid #222;
+  border-radius: 15px 225px 15px 255px / 255px 15px 225px 15px;
+  box-shadow: 6px 6px 0 #222;
+  max-width: 640px;
+  width: calc(100% - 48px);
+  /* 精准居中 + 视觉补偿 */
+  transform: translate(-50%, -50%) translate(-6px, -6px);
+}
+
+h1 {
+  font-size: 3rem;
+  margin-bottom: 20px;
+}
+
+h2 {
+  font-size: 2rem;
+  margin-bottom: 16px;
+}
+
+button {
+  font-family: 'ZCOOL KuaiLe', cursive;
+  font-size: 1.2rem;
+  padding: 10px 20px;
+  border: 3px solid #222;
+  background: #fff;
+  color: #222;
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 4px 4px 0 #222;
+  transition: transform .1s ease, box-shadow .1s ease, background .1s ease;
+  margin: 6px;
+}
+
+button:hover {
+  background: #f5f5f5;
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 #222;
+}
+
+button:active {
+  background: #eee;
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 #222;
+}
+
+.player-list-container {
+  min-height: 150px;
+  border: 2px dashed #999;
+  padding: 10px;
+  margin: 10px 0 20px;
+}
+
+#player-list {
+  list-style: none;
+}
+
+#player-list li {
   display: flex;
+  justify-content: space-between;
+  padding: 6px 2px;
+  font-size: 1.1rem;
+}
+
+.player-status {
+  color: #888;
+  font-style: italic;
+}
+
+.player-status.ready {
+  color: #2ecc71;
+}
+
+#lobby-status {
+  margin-top: 10px;
+  color: #444;
+}
+
+#game-container {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  /* Let browser smooth; Phaser uses DPR for crispness */
+}
+
+/* In-game action bar */
+#action-bar {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  gap: 14px;
   justify-content: center;
   align-items: center;
+  padding: 12px;
+  background: #fff;
+  border: 3px solid #222;
+  border-radius: 14px;
+  box-shadow: 6px 6px 0 #222;
+  flex-direction: column;
+  /* 居中布局：状态在上，操作按钮在下 */
+  text-align: center;
+  /* 文本居中 */
+  max-height: 42vh;
+  overflow: auto;
 }
+
+/* 操作按钮行容器：保持横向排列与居中 */
+.action-buttons {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 顶部状态与我的状态，采用与对手图案一致的字体与风格 */
+.action-bar-header,
+.action-bar-status {
+  font-family: 'ZCOOL KuaiLe, sans-serif';
+  color: #111;
+}
+
+.action-bar-header {
+  font-size: 16px;
+}
+
+.action-bar-status {
+  font-size: 14px;
+}
+
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 3px solid #222;
+  background: #fff;
+  color: #222;
+  border-radius: 10px;
+  box-shadow: 3px 3px 0 #222;
+  cursor: pointer;
+  width: 100px;
+}
+
+.action-btn.disabled {
+  opacity: 0.4;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
+
+.action-btn img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 2px solid #222;
+  border-radius: 8px;
+}
+
+.action-btn span {
+  font-size: 14px;
+}
+
+/* 耗气字号缩小 */
+.action-btn em.energy {
+  font-size: 12px;
+  color: #555;
+}
+
+/* target overlay removed; direct click in canvas */
 
 /* 调试面板样式 */
 #debug-panel input[type="number"] {
@@ -63,4 +274,55 @@ body {
 
 #game-logs div:last-child {
   border-bottom: none;
+}
+
+@media (max-width: 768px) {
+  body {
+    overflow: hidden;
+  }
+
+  #ui-container {
+    width: calc(100% - 24px);
+    padding: 22px;
+    transform: translate(-50%, -50%);
+  }
+
+  #action-bar {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .action-bar-header {
+    font-size: 13px;
+  }
+
+  .action-bar-status {
+    font-size: 12px;
+  }
+
+  .action-buttons {
+    gap: 8px;
+  }
+
+  .action-btn {
+    width: 74px;
+    padding: 6px;
+    gap: 4px;
+  }
+
+  .action-btn img {
+    width: 40px;
+    height: 40px;
+  }
+
+  .action-btn span {
+    font-size: 11px;
+  }
+
+  .action-btn em.energy {
+    font-size: 10px;
+  }
 }

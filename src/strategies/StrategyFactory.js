@@ -1,6 +1,6 @@
 import { AttackVsAttackStrategy } from './AttackVsAttackStrategy.js';
 import { AttackVsDefendStrategy } from './AttackVsDefendStrategy.js';
-import { AttackVsReflectStrategy } from './AttackVsReflectStrategy.js';
+import { AttackVsReboundStrategy } from './AttackVsReboundStrategy.js';
 import { DefaultStrategy } from './DefaultStrategy.js';
 import { ActionType } from '../core/enums/ActionType.js';
 
@@ -15,8 +15,8 @@ export class StrategyFactory {
                 return new AttackVsAttackStrategy();
             case ActionType.DEFEND:
                 return new AttackVsDefendStrategy();
-            case ActionType.REFLECT:
-                return new AttackVsReflectStrategy();
+            case ActionType.REBOUND:
+                return new AttackVsReboundStrategy();
             default:
                 return new DefaultStrategy();
         }

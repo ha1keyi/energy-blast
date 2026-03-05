@@ -25,12 +25,12 @@ export const ACTIONS = {
         name: '防御',
         description: '减少1点受到的伤害'
     },
-    REFLECT_1: {
-        type: ActionType.REFLECT,
+    REBOUND_1: {
+        type: ActionType.REBOUND,
         level: 1,
         energyCost: 2,
         reduction: 1,
-        reflectDamage: 1,
+        reboundDamage: 1,
         name: '反弹',
         description: '消耗2气，减少1点伤害并反弹1点伤害'
     },

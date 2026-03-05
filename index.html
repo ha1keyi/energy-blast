@@ -10,9 +10,98 @@
 
 <body>
   <div id="app">
-    <div id="game-container"></div>
+    <!-- Phaser canvas parent; Phaser will insert a canvas here -->
+    <div id="game-canvas"></div>
+    <!-- HTML UI overlay -->
+    <div id="ui-layer">
+      <div id="ui-container">
+        <!-- 主页 -->
+        <div id="home-screen">
+          <h1>Energy Blast</h1>
+          <p id="connection-status" style="margin:8px 0; color:#888; font-size:14px;">连接中...</p>
+          <button id="start-game-btn" class="interactive">进入房间</button>
+        </div>
+
+        <!-- 房间 -->
+        <div id="lobby-screen" class="hidden">
+          <h2>游戏房间</h2>
+          <div class="player-list-container">
+            <ul id="player-list"></ul>
+          </div>
+          <div class="lobby-actions">
+            <button id="ready-btn" class="interactive">准备</button>
+            <button id="share-link-btn" class="interactive">分享链接</button>
+          </div>
+          <p id="lobby-status">等待所有玩家准备...</p>
+        </div>
+      </div>
+
+      <!-- 名字输入弹窗（替代浏览器 prompt） -->
+      <div id="name-modal" class="interactive hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; align-items: center; justify-content: center;">
+        <div
+          style="background:#fff; color:#333; padding:16px; border-radius:8px; width: 300px; box-shadow: 0 6px 24px rgba(0,0,0,.25);">
+          <h3 style="margin: 0 0 10px 0; font-size: 18px;">请输入名字</h3>
+          <input id="player-name-input" type="text" placeholder="你的名字"
+            style="width:100%; padding:8px 10px; margin-bottom:12px; border:1px solid #ddd; border-radius:6px; outline:none;">
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button id="name-cancel-btn" class="interactive" style="background:#eee; color:#333;">取消</button>
+            <button id="name-confirm-btn" class="interactive" style="background:#27ae60;">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 全局确认弹窗（替代 confirm） -->
+      <div id="confirm-modal" class="interactive hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; align-items: center; justify-content: center;">
+        <div
+          style="background:#fff; color:#333; padding:16px; border-radius:8px; width: 320px; box-shadow: 0 6px 24px rgba(0,0,0,.25);">
+          <div id="confirm-message" style="margin: 0 0 16px 0; font-size: 16px; line-height:1.4;"></div>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <button id="confirm-cancel-btn" class="interactive" style="background:#eee; color:#333;">取消</button>
+            <button id="confirm-ok-btn" class="interactive" style="background:#e74c3c;">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 轻提示（替代 alert） -->
+      <div id="toast" class="hidden"
+        style="position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.85); color: #fff; padding: 10px 14px; border-radius: 20px; z-index: 1000; font-size: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.25);">
+      </div>
+
+      <!-- In-game Action Bar (visible during gameplay) -->
+      <div id="action-bar" class="interactive hidden"></div>
+
+      <!-- Debug Panel (host-visible by default; can be forced via togglevisibility) -->
+      <div id="debug-panel" class="interactive"
+        style="position: fixed; right: 12px; top: 12px; z-index: 1100; background: #fff; color: #333; border: 2px solid #000; border-radius: 10px; padding: 10px 12px; box-shadow: 4px 4px 0 #000; min-width: 200px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <strong style="font-size:14px;">Debug 控制台</strong>
+        </div>
+        <div style="font-size:12px; color:#666; margin-bottom:4px;">(Ctrl+Shift+D 切换显示)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px;">
+          <input id="debug-auto-checkbox" type="checkbox" /> 自动结算
+        </label>
+        <button id="debug-resolve-btn" class="interactive"
+          style="margin-top:8px; background:#27ae60; color:#fff; width:100%;">立即结算</button>
+
+        <!-- Player Stats Adjustment -->
+        <div style="margin-top:8px; border-top:1px solid #ddd; padding-top:8px;">
+          <div style="font-size:12px; font-weight:bold; margin-bottom:4px;">调整数值</div>
+          <div style="display:flex; gap:4px; margin-bottom:4px;">
+            <input id="debug-pid" type="number" placeholder="ID" style="width:40px; padding:2px;">
+            <select id="debug-prop" style="flex:1;">
+              <option value="health">血量</option>
+              <option value="energy">气</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <input id="debug-val" type="number" placeholder="数值" style="width:60px; padding:2px;">
+            <button id="debug-set-btn" class="interactive" style="background:#3498db; color:#fff; flex:1;">设置</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
-
-</html>
