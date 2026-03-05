@@ -77,6 +77,7 @@ export class GameScene extends Phaser.Scene {
 
         // 初始化结算画面容器
         this.endScreenContainer = this.add.container(0, 0).setDepth(100).setVisible(false);
+        this.endAutoReturnTimer = null;
 
         // 去重：仅保留一个定时器轮询 HUD / 日志 / 待选提示
         this.time.addEvent({
@@ -162,7 +163,7 @@ export class GameScene extends Phaser.Scene {
         const rematchBtn = this.createHandDrawnButton(btnX - 90, btnY, btnW, btnH, '再来一局', () => this.handleRematch());
 
         // “退出房间”按钮（手绘风格）
-        const exitBtn = this.createHandDrawnButton(btnX + 90, btnY, btnW, btnH, '退出房间', () => this.handleExitRoom());
+        const exitBtn = this.createHandDrawnButton(btnX + 90, btnY, btnW, btnH, '返回大厅', () => this.handleReturnLobby());
 
         this.endScreenContainer.add([overlay, graphics, title, result, ...rematchBtn, ...exitBtn]);
 
@@ -175,8 +176,15 @@ export class GameScene extends Phaser.Scene {
             ease: 'Power2'
         });
 
-        // 自动超时保护：5秒后若无操作，提示或执行默认行为（这里仅作为保护，不强制退出）
-        // 如果需要强制返回，可以在这里添加 delayedCall
+        // 自动兜底：避免卡在结束动画，8 秒后自动回大厅
+        if (this.endAutoReturnTimer) {
+            this.endAutoReturnTimer.remove(false);
+        }
+        this.endAutoReturnTimer = this.time.delayedCall(8000, () => {
+            if (this.getCore()?.gameState === 'ended') {
+                this.handleReturnLobby();
+            }
+        });
     }
 
     createHandDrawnButton(x, y, w, h, text, onClick) {
@@ -216,7 +224,21 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    handleReturnLobby() {
+        if (this.endAutoReturnTimer) {
+            this.endAutoReturnTimer.remove(false);
+            this.endAutoReturnTimer = null;
+        }
+        if (typeof window.returnToLobby === 'function') {
+            window.returnToLobby();
+        }
+    }
+
     handleRematch() {
+        if (this.endAutoReturnTimer) {
+            this.endAutoReturnTimer.remove(false);
+            this.endAutoReturnTimer = null;
+        }
         // request rematch
         const socket = LobbyManager.socket;
         const roomId = LobbyManager.roomId;
@@ -486,7 +508,7 @@ export class GameScene extends Phaser.Scene {
         const { width, height } = this.scale;
         const panelWidth = Math.min(420, Math.max(240, Math.floor(width * 0.44)));
         const panelHeight = Math.min(170, Math.max(120, Math.floor(height * 0.28)));
-        const x = width - panelWidth - 16;
+        const x = 16;
 
         // Prefer high placement so it never collides with bottom action bar on desktop/mobile.
         const y = 76;

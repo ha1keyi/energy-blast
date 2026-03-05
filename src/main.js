@@ -583,7 +583,15 @@ function startGame({ force = false } = {}) {
   // Inject lobby players into core game and start
   // Avoid duplicate players when starting via different paths
   gameCore.players = [];
-  LobbyManager.list().forEach(p => gameCore.addPlayer(p.name, { isBot: !!p.isBot }));
+  const lobbyPlayers = LobbyManager.list();
+  const selfLobby = (LobbyManager.getSelf && LobbyManager.getSelf()) || null;
+  lobbyPlayers.forEach((p, idx) => {
+    gameCore.addPlayer(p.name, { isBot: !!p.isBot });
+    const added = gameCore.players[idx];
+    if (selfLobby && p.id === selfLobby.id && added) {
+      localPlayerId = added.id;
+    }
+  });
   gameCore.startGame();
   endHandled = false;
   // Start Phaser GameScene on demand
@@ -592,11 +600,7 @@ function startGame({ force = false } = {}) {
   }
   // Show action bar when selecting
   // Determine local player by matching lobby self name to core players to avoid wrong self-id
-  const selfLobby = (LobbyManager.getSelf && LobbyManager.getSelf()) || null;
-  if (selfLobby) {
-    const me = gameCore.players.find(p => p.name === selfLobby.name);
-    localPlayerId = (me && me.id) || (gameCore.players[0] && gameCore.players[0].id) || 1;
-  } else {
+  if (!localPlayerId) {
     localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
   }
   window.localPlayerId = localPlayerId;

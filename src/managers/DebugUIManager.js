@@ -1,6 +1,7 @@
 // src/managers/DebugUIManager.js
 // Minimal Debug UI manager; visible by default only for the room host.
 import { LobbyManager } from './LobbyManager.js';
+import { ACTIONS } from '../core/constants/Actions.js';
 
 export class DebugUIManager {
   constructor(game) {
@@ -134,14 +135,66 @@ export class DebugUIManager {
       if (field === 'health') player.health = Number(target.value || player.health);
       if (field === 'energy') player.energy = Number(target.value || player.energy);
       if (field === 'score') player.score = Number(target.value || player.score || 0);
-      if (field === 'isAlive') player.isAlive = !!target.checked;
-      if (field === 'isBot') player.isBot = !!target.checked;
+      if (field === 'actionKey' || field === 'targetId') {
+        this.applyActionEdit(row, player);
+      }
 
       this.game?.nextFrame?.();
       this.renderPlayerEditor(true);
     });
 
     this._editorBound = true;
+  }
+
+  getActionKeyByPlayer(player) {
+    if (!player?.currentAction) return '';
+    const { type, level, name } = player.currentAction;
+    const entry = Object.entries(ACTIONS).find(([, cfg]) => (
+      cfg.type === type && cfg.level === level && cfg.name === name
+    ));
+    return entry ? entry[0] : '';
+  }
+
+  applyActionEdit(row, player) {
+    const actionSel = row.querySelector('[data-field="actionKey"]');
+    const targetSel = row.querySelector('[data-field="targetId"]');
+    if (!actionSel) return;
+
+    const actionKey = actionSel.value || '';
+    const actionCfg = ACTIONS[actionKey];
+    if (!actionCfg) {
+      player.currentAction = null;
+      player.target = null;
+      return;
+    }
+
+    // Make debug editing straightforward even when energy is not enough.
+    if (typeof actionCfg.energyCost === 'number' && player.energy < actionCfg.energyCost) {
+      player.energy = actionCfg.energyCost;
+    }
+
+    let target = null;
+    const rawTargetId = targetSel?.value || '';
+    if (rawTargetId) {
+      target = (this.game.players || []).find(p => String(p.id) === rawTargetId) || null;
+    }
+
+    if (actionCfg.type === 'ATTACK') {
+      if (!target || target.id === player.id) {
+        target = (this.game.players || []).find(p => p.id !== player.id && p.isAlive) || null;
+      }
+      if (!target) {
+        if (typeof window.showToast === 'function') window.showToast('没有可用攻击目标');
+        return;
+      }
+      player.selectAction(actionKey, target);
+      if (targetSel) targetSel.value = String(target.id);
+      return;
+    }
+
+    player.selectAction(actionKey, null);
+    player.target = null;
+    if (targetSel) targetSel.value = '';
   }
 
   renderPlayerEditor(force = false) {
@@ -168,19 +221,42 @@ export class DebugUIManager {
       return;
     }
 
-    const rows = players.map((p) => `
+    const actionOptions = Object.entries(ACTIONS).map(([k, cfg]) => (
+      `<option value="${k}">${cfg.name}</option>`
+    )).join('');
+
+    const rows = players.map((p) => {
+      const currentActionKey = this.getActionKeyByPlayer(p);
+      const targetOptions = ['<option value="">-</option>']
+        .concat(players
+          .filter(tp => tp.id !== p.id)
+          .map(tp => `<option value="${tp.id}">${tp.name}</option>`))
+        .join('');
+      const targetId = p.target?.id != null ? String(p.target.id) : '';
+
+      return `
       <tr data-player-id="${p.id}">
         <td>${p.id}</td>
         <td><input data-field="name" value="${String(p.name || '').replace(/"/g, '&quot;')}" /></td>
         <td><input data-field="health" type="number" value="${Number(p.health ?? 0)}" /></td>
         <td><input data-field="energy" type="number" value="${Number(p.energy ?? 0)}" /></td>
         <td><input data-field="score" type="number" value="${Number(p.score ?? 0)}" /></td>
-        <td><input data-field="isAlive" type="checkbox" ${p.isAlive ? 'checked' : ''} /></td>
-        <td><input data-field="isBot" type="checkbox" ${p.isBot ? 'checked' : ''} /></td>
-        <td>${p.currentAction?.name || '-'}</td>
-        <td>${p.target?.name || '-'}</td>
+        <td>${p.isAlive ? '是' : '否'}</td>
+        <td>${p.isBot ? '是' : '否'}</td>
+        <td>
+          <select data-field="actionKey">
+            <option value="">-</option>
+            ${actionOptions.replace(`value="${currentActionKey}"`, `value="${currentActionKey}" selected`)}
+          </select>
+        </td>
+        <td>
+          <select data-field="targetId">
+            ${targetOptions.replace(`value="${targetId}"`, `value="${targetId}" selected`)}
+          </select>
+        </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     editor.innerHTML = `
       <div class="debug-table-wrap">
