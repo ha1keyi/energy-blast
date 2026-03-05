@@ -8,7 +8,9 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: true,
+    methods: ['GET', 'POST'],
+    credentials: false,
   }
 });
 
@@ -23,6 +25,7 @@ function getRoomState(roomId) {
       id: p.id,
       name: p.name,
       ready: p.ready || false,
+      isBot: !!p.isBot,
       // Include game state if game is running
       health: p.health,
       energy: p.energy,
@@ -33,7 +36,8 @@ function getRoomState(roomId) {
 }
 
 io.on('connection', (socket) => {
-  console.log('New client connected:', socket.id);
+  // Minimal connect log
+  console.info('Client connected:', socket.id);
 
   socket.on('createRoom', ({ name }) => {
     const roomId = Math.random().toString(36).substring(2, 8);
@@ -94,22 +98,54 @@ io.on('connection', (socket) => {
         player.ready = !player.ready;
         io.to(roomId).emit('roomState', getRoomState(roomId));
 
-        // Check if all players are ready to start
-        const allReady = rooms[roomId].players.length >= 2 &&
-          rooms[roomId].players.every(p => p.ready);
-        if (allReady && !rooms[roomId].game) {
-          rooms[roomId].game = { started: true };
-          // Initialize server-side game players if we wanted to run logic here
-          // rooms[roomId].gameInstance.players = ...
-          io.to(roomId).emit('gameStarted', getRoomState(roomId));
-        }
       }
     }
   });
 
+  socket.on('startGame', (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    // Only room host (creator, first player) can start.
+    const isHost = room.players[0] && room.players[0].id === socket.id;
+    if (!isHost) return;
+
+    const allReady = room.players.length >= 2 && room.players.every(p => p.ready);
+    if (!allReady) {
+      socket.emit('error', 'Not all players are ready');
+      return;
+    }
+
+    if (room.game) return;
+    room.game = { started: true };
+    io.to(roomId).emit('gameStarted', getRoomState(roomId));
+  });
+
+  socket.on('addBot', ({ roomId, name }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const isHost = room.players[0] && room.players[0].id === socket.id;
+    if (!isHost) return;
+
+    const botId = `bot-${Math.random().toString(36).slice(2, 8)}`;
+    const botName = (name || '').trim() || `虚拟玩家${Math.floor(Math.random() * 1000)}`;
+    room.players.push({
+      id: botId,
+      name: botName,
+      ready: true,
+      isBot: true,
+      health: 1,
+      energy: 0,
+      isAlive: true,
+    });
+
+    io.to(roomId).emit('roomState', getRoomState(roomId));
+  });
+
   socket.on('selectAction', (roomId, actionKey, targetId) => {
     // Broadcast action to all (client-side logic handles the rest)
-    console.log(`[selectAction] room=${roomId} player=${socket.id} action=${actionKey} target=${targetId}`);
+    // action broadcast received (suppress verbose logging in production)
     io.to(roomId).emit('actionSelected', { playerId: socket.id, actionKey, targetId });
   });
 
@@ -123,14 +159,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('requestRematch', (roomId) => {
-    console.log(`[requestRematch] room=${roomId} by ${socket.id}`);
+    console.info('Rematch requested in room', roomId);
     const room = rooms[roomId];
     if (room) {
       // 重置房间游戏状态
       room.game = null;
       // 重置所有玩家状态
       room.players.forEach(p => {
-        p.ready = false;
+        p.ready = p.isBot ? true : false;
         // 重置游戏内属性（如果需要同步给客户端）
         p.health = 1; // 初始血量
         p.energy = 0; // 初始气量
@@ -143,8 +179,32 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('leaveRoom', (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    socket.leave(roomId);
+    const playerIndex = room.players.findIndex(p => p.id === socket.id);
+    if (playerIndex !== -1) {
+      room.players.splice(playerIndex, 1);
+    }
+
+    if (room.players.length === 0) {
+      delete rooms[roomId];
+      return;
+    }
+
+    if (room.game && room.players.length < 2) {
+      room.game = null;
+      io.to(roomId).emit('gameEnded', 'Player left room');
+    }
+
+    io.to(roomId).emit('playerLeft', socket.id);
+    io.to(roomId).emit('roomState', getRoomState(roomId));
+  });
+
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    console.info('Client disconnected:', socket.id);
     // Find and clean up rooms where the player was
     for (let roomId in rooms) {
       const room = rooms[roomId];

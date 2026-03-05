@@ -7,7 +7,7 @@ tunnels:
     addr: 5173
     host_header: "localhost:5173"
     
-  backend:
-    proto: http
-    addr: 3000
-    host_header: "localhost:3000"
+  # backend:
+  #   proto: http
+  #   addr: 3000
+  #   host_header: "localhost:3000"

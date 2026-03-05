@@ -56,6 +56,7 @@ LobbyManager.connect();
       }
     });
 
+    sock.off && sock.off('actionSelected');
     sock.on('actionSelected', ({ playerId, actionKey, targetId }) => {
       if (LobbyManager.isHost() && window.game) {
         const core = window.game;
@@ -79,17 +80,17 @@ LobbyManager.connect();
       }
     });
 
-    // 非房主：收到开始游戏时，直接进入游戏界面
+    // 所有客户端：收到服务端开局事件后进入游戏
     sock.off && sock.off('gameStarted');
     sock.on('gameStarted', () => {
-      if (!LobbyManager.isHost() && typeof window.startGameFromLobby === 'function') {
-        window.startGameFromLobby();
+      if (typeof window.startGameFromLobby === 'function') {
+        window.startGameFromLobby({ force: true });
       }
     });
 
     // 收到再来一局通知
+    sock.off && sock.off('rematchStarted');
     sock.on('rematchStarted', () => {
-      console.log('[Network] Rematch received, returning to lobby...');
       if (window.game) {
         window.game.isRunning = false;
         window.game.gameState = 'idle';
@@ -97,18 +98,8 @@ LobbyManager.connect();
         window.game.logs = [];
         if (window.game.store) window.game.store.clearLogs();
       }
-      // 切换到大厅界面
-      const homeScreen = document.getElementById('home-screen');
-      const lobbyScreen = document.getElementById('lobby-screen');
-      const uiContainer = document.getElementById('ui-container');
-
-      if (uiContainer) uiContainer.classList.remove('hidden');
-      if (homeScreen) homeScreen.classList.add('hidden');
-      if (lobbyScreen) lobbyScreen.classList.remove('hidden');
-
-      // 停止 Phaser 场景
-      if (window.phaserGame && window.phaserGame.scene.isActive('GameScene')) {
-        window.phaserGame.scene.stop('GameScene');
+      if (typeof window.returnToLobby === 'function') {
+        window.returnToLobby();
       }
     });
   };
@@ -121,7 +112,7 @@ LobbyManager.connect();
     if (!core || !LobbyManager.connected || !LobbyManager.roomId || !LobbyManager.isHost()) return;
     const snap = { round: core.currentRound, state: core.gameState, logs: core.logs?.length || 0 };
     if (snap.round !== lastBroadcast.round || snap.state !== lastBroadcast.state || snap.logs !== lastBroadcast.logs) {
-      // 发送当前状态给其他客户端
+      // broadcast minimal snapshot to others
       LobbyManager.socket.emit('roundResolved', LobbyManager.roomId, core.getGameState ? core.getGameState() : {
         round: core.currentRound,
         state: core.gameState,
@@ -174,6 +165,10 @@ const connStatus = document.getElementById('connection-status');
 const playerListEl = document.getElementById('player-list');
 const lobbyStatusEl = document.getElementById('lobby-status');
 const actionBarEl = document.getElementById('action-bar');
+const gameCanvasEl = document.getElementById('game-canvas');
+
+// Default to lobby/home first; game canvas is shown only while a match is running.
+gameCanvasEl?.classList.add('hidden');
 
 // 动态添加“添加虚拟玩家”按钮
 (function ensureAddBotButton() {
@@ -249,6 +244,40 @@ function openNameModal(defaultName = `玩家${Math.floor(Math.random() * 100)}`,
 }
 let localPlayerId = 1; // assume host is player 1 in this demo
 let gameSyncIntervalId = null;
+let endHandled = false;
+
+function returnToLobby({ resetRoom = false } = {}) {
+  window.pendingAttack = null;
+  endHandled = false;
+
+  if (gameSyncIntervalId) {
+    clearInterval(gameSyncIntervalId);
+    gameSyncIntervalId = null;
+  }
+
+  if (window.phaserGame && window.phaserGame.scene.isActive('GameScene')) {
+    window.phaserGame.scene.stop('GameScene');
+  }
+
+  gameCore.clearTimer?.();
+  gameCore.isRunning = false;
+  gameCore.gameState = 'idle';
+  gameCore.nextResolveAt = null;
+  if (gameCanvasEl) gameCanvasEl.classList.add('hidden');
+
+  if (resetRoom) {
+    LobbyManager.roomId = null;
+    LobbyManager.reset();
+  }
+
+  document.getElementById('ui-container')?.classList.remove('hidden');
+  homeScreen?.classList.add('hidden');
+  lobbyScreen?.classList.remove('hidden');
+
+  renderLobby();
+}
+
+window.returnToLobby = returnToLobby;
 
 // Map image filenames to resolved URLs via Vite asset pipeline
 const imageModules = import.meta.glob('./assets/images/*.jpg', { eager: true });
@@ -434,7 +463,8 @@ function renderLobby() {
       btn.onclick = () => {
         // 二次检查状态
         if (!LobbyManager.allReady()) return showToast('有玩家取消了准备');
-        startGame();
+        if (!LobbyManager.roomId || !LobbyManager.socket) return;
+        LobbyManager.socket.emit('startGame', LobbyManager.roomId);
         btn.remove();
       };
 
@@ -518,7 +548,7 @@ shareBtn?.addEventListener('click', () => {
   // If we're on ngrok, just use the current origin.
   // Otherwise, fallback to the socket hostname logic for local network.
   const isNgrok = location.hostname.endsWith('ngrok-free.dev') || location.hostname.endsWith('ngrok.io');
-  
+
   if (!isNgrok && LobbyManager.socket && LobbyManager.connected) {
     try {
       const socketUrl = new URL(LobbyManager.socket.io.uri);
@@ -543,16 +573,19 @@ shareBtn?.addEventListener('click', () => {
   }
 });
 
-function startGame() {
-  if (!LobbyManager.allReady()) return;
+function startGame({ force = false } = {}) {
+  if (!force && !LobbyManager.allReady()) return;
+  if (gameCore.isRunning && phaserGame.scene.isActive('GameScene')) return;
+
   // Hide DOM UI; game runs on canvas
   document.getElementById('ui-container')?.classList.add('hidden');
+  if (gameCanvasEl) gameCanvasEl.classList.remove('hidden');
   // Inject lobby players into core game and start
   // Avoid duplicate players when starting via different paths
   gameCore.players = [];
   LobbyManager.list().forEach(p => gameCore.addPlayer(p.name, { isBot: !!p.isBot }));
-  // 防重复：若已运行则不再重复 start
-  if (!gameCore.isRunning) gameCore.startGame();
+  gameCore.startGame();
+  endHandled = false;
   // Start Phaser GameScene on demand
   if (!phaserGame.scene.isActive('GameScene')) {
     phaserGame.scene.start('GameScene');
@@ -583,16 +616,7 @@ function startGame() {
     // Game over -> return to lobby UI
     if (gameCore.gameState === 'ended') {
       window.pendingAttack = null;
-      // 不再自动隐藏 Phaser 场景和 UI，以便显示结算画面
-      // document.getElementById('ui-container')?.classList.remove('hidden');
-      // homeScreen?.classList.add('hidden');
-      // lobbyScreen?.classList.remove('hidden');
-      // Update lobby status
-      // if (lobbyStatusEl) lobbyStatusEl.textContent = '游戏结束，等待所有玩家准备…';
-      // Stop scene
-      // if (phaserGame.scene.isActive('GameScene')) phaserGame.scene.stop('GameScene');
-      // stop polling
-      // if (gameSyncIntervalId) { clearInterval(gameSyncIntervalId); gameSyncIntervalId = null; }
+      endHandled = true;
     }
   };
   // Observe game state via polling simple interval (Dev)

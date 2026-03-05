@@ -196,7 +196,18 @@ export class Game {
             gameState: this.gameState,
             state: this.gameState,
             logs: this.logs,
-            players: this.players.map(p => p.getStatus()),
+            players: this.players.map(p => ({
+                ...p.getStatus(),
+                currentAction: p.currentAction ? {
+                    type: p.currentAction.type,
+                    level: p.currentAction.level,
+                    name: p.currentAction.name,
+                    energyCost: p.currentAction.energyCost,
+                    energyGain: p.currentAction.energyGain,
+                } : null,
+                targetId: p.target ? p.target.id : null,
+                targetName: p.target ? p.target.name : null,
+            })),
         };
     }
 

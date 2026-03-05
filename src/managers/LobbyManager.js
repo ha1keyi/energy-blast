@@ -17,36 +17,52 @@ class LobbyManagerImpl {
     this._pendingAction = null; // Action to run upon connection
   }
 
-  connect() {
-    if (this.socket) return;
-    // Prefer env-configured server URL, fallback to current host:3000 for LAN
-    const defaultUrl = (typeof window !== 'undefined')
-      ? `${window.location.protocol}//${window.location.hostname}:3000`
-      : 'http://localhost:3000';
+  _isNgrokHost(hostname) {
+    return !!hostname && (hostname.endsWith('ngrok-free.dev') || hostname.endsWith('ngrok.io'));
+  }
 
-    // Allow URL param overrides: ?server=host:port or full URL, or ?serverPort=3001
-    let urlOverride = null;
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const serverParam = params.get('server') || params.get('serverUrl');
-        const serverPortParam = params.get('serverPort');
-        if (serverParam) {
-          urlOverride = serverParam.startsWith('http')
-            ? serverParam
-            : `${window.location.protocol}//${serverParam}`;
-        } else if (serverPortParam) {
-          urlOverride = `${window.location.protocol}//${window.location.hostname}:${serverPortParam}`;
-        }
-      } catch (_) {}
+  _isLocalHost(hostname) {
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+  }
+
+  _resolveServerUrl() {
+    if (typeof window === 'undefined') return 'http://localhost:3000';
+
+    const { protocol, hostname, origin, search } = window.location;
+    const params = new URLSearchParams(search);
+    const serverParam = params.get('server') || params.get('serverUrl');
+    const serverPortParam = params.get('serverPort');
+
+    // Explicit URL/query override takes highest priority for debugging.
+    if (serverParam) {
+      return serverParam.startsWith('http')
+        ? serverParam
+        : `${protocol}//${serverParam}`;
+    }
+    if (serverPortParam) {
+      return `${protocol}//${hostname}:${serverPortParam}`;
     }
 
-    const serverUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SERVER_URL)
-      ? import.meta.env.VITE_SERVER_URL
-      : (urlOverride || defaultUrl);
+    const envUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SERVER_URL)
+      ? String(import.meta.env.VITE_SERVER_URL).trim()
+      : '';
+
+    // Public hosts should always prefer same-origin proxy to avoid pointing clients to localhost.
+    if (!this._isLocalHost(hostname) || this._isNgrokHost(hostname)) {
+      return origin;
+    }
+
+    if (envUrl) return envUrl;
+    return `${protocol}//${hostname}:3000`;
+  }
+
+  connect() {
+    if (this.socket) return;
+    const serverUrl = this._resolveServerUrl();
 
     this.socket = io(serverUrl, {
-      transports: ['websocket'],
+      path: '/socket.io',
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
@@ -55,7 +71,7 @@ class LobbyManagerImpl {
     });
 
     this.socket.on('connect', () => {
-      console.log('Connected to server with id', this.socket.id);
+      console.info('Socket connected:', this.socket.id);
       this.playerId = this.socket.id;
       this.connected = true; // 标记为已连接
 
@@ -84,7 +100,7 @@ class LobbyManagerImpl {
       // 清理 roomId，保持在首页或当前界面
       this.roomId = null;
       if (typeof window !== 'undefined' && window.showToast) {
-        try { window.showToast(`加入失败：${msg}`); } catch(_) {}
+        try { window.showToast(`加入失败：${msg}`); } catch (_) { }
       }
       this._emit();
     });
@@ -118,7 +134,7 @@ class LobbyManagerImpl {
   }
 
   subscribe(fn) {
-    if (typeof fn !== 'function') return () => {};
+    if (typeof fn !== 'function') return () => { };
     this._subs.add(fn);
     return () => this._subs.delete(fn);
   }
@@ -128,7 +144,7 @@ class LobbyManagerImpl {
   }
 
   _emit() {
-    this._subs.forEach(fn => { try { fn(); } catch (_) {} });
+    this._subs.forEach(fn => { try { fn(); } catch (_) { } });
   }
 
   // Combined list of server players and local bots
@@ -151,6 +167,11 @@ class LobbyManagerImpl {
 
   // Local-only: add a virtual player in lobby
   add(name) {
+    if (this.connected && this.socket && this.roomId && this.isHost()) {
+      this.socket.emit('addBot', { roomId: this.roomId, name });
+      return null;
+    }
+
     const newPlayer = { id: `bot-${this.nextId++}`, name, ready: true, isBot: true };
     this.bots.push(newPlayer);
     this._emit();
@@ -260,9 +281,6 @@ class LobbyManagerImpl {
     this.socket.emit('toggleReady');
   }
 
-  isHost() {
-    return !!(this.serverPlayers[0] && this.serverPlayers[0].id === this.playerId);
-  }
   allReady() {
     const players = this.list();
     if (players.length < 2) return false; // 至少两名玩家才能开始
@@ -275,4 +293,4 @@ export const LobbyManager = new LobbyManagerImpl();
 if (typeof window !== 'undefined') {
   window.lobby = LobbyManager;
 }
-
+
