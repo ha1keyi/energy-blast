@@ -8,7 +8,7 @@ export class AttackVsAttackStrategy extends ActionStrategy {
         if (attackAction.level > attackeeAction.level) {
             // 攻击者等级更高
             const damage = attackAction.getActualDamage();
-            attackee.takeDamage(damage);
+            attackee.handleAttack(damage);
             return {
                 message: `${attacker.name}的攻击命中${attackee.name}，造成${damage}点伤害`,
                 damage: damage,
@@ -17,7 +17,7 @@ export class AttackVsAttackStrategy extends ActionStrategy {
         } else if (attackeeAction.level > attackAction.level) {
             // 防御者等级更高
             const damage = attackeeAction.getActualDamage();
-            attacker.takeDamage(damage);
+            attacker.handleAttack(damage);
             return {
                 message: `${attackee.name}反击${attacker.name}，造成${damage}点伤害`,
                 damage: damage,

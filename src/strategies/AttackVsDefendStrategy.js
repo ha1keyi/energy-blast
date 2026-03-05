@@ -11,7 +11,7 @@ export class AttackVsDefendStrategy extends ActionStrategy {
             const defenseReduction = attackeeAction.getActualReduction();
             const actualDamage = this.calculateDamage(attackDamage, defenseReduction);
 
-            attackee.takeDamage(actualDamage);
+            attackee.handleAttack(actualDamage);
 
             return {
                 message: `${attacker.name}的攻击突破了${attackee.name}的防御，造成${actualDamage}点伤害`,

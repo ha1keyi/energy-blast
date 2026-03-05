@@ -275,3 +275,4 @@ export const LobbyManager = new LobbyManagerImpl();
 if (typeof window !== 'undefined') {
   window.lobby = LobbyManager;
 }
+

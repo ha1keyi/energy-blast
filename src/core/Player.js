@@ -63,7 +63,8 @@ export class Player {
             actionConfig.reduction,
             actionConfig.reboundDamage,
             actionConfig.name,
-            actionConfig.description
+            actionConfig.description,
+            actionConfig.energyGain
         );
 
         this.target = target;
@@ -80,39 +81,23 @@ export class Player {
     adjustEnergy() {
         if (this.currentAction) {
             this.energy -= this.currentAction.energyCost;
+            if (this.currentAction.energyGain) {
+                this.energy += this.currentAction.energyGain;
+            }
         }
     }
 
-    // 受到攻击时的处理
-    handleAttack(attackAction, attacker) {
-        const damage = attackAction.damage || 0;
-        const reduction = this.currentAction && this.currentAction.reduction ? this.currentAction.reduction : 0;
-        const actualDamage = Math.max(0, damage - reduction);
-        this.health -= actualDamage;
-
+    // 受到直接伤害（由策略类调用）
+    // 统一使用 handleAttack 来处理生命值变更，遵循高内聚原则
+    handleAttack(amount) {
+        if (typeof amount !== 'number') {
+            console.warn('[Player] handleAttack expected number, got:', amount);
+            amount = 0;
+        }
+        this.health -= amount;
         if (this.health <= 0) {
             this.isAlive = false;
         }
-
-        // 反弹伤害
-        let reboundApplied = 0;
-        if (this.currentAction && this.currentAction.reboundDamage) {
-            attacker.health -= this.currentAction.reboundDamage;
-            reboundApplied = this.currentAction.reboundDamage;
-            if (attacker.health <= 0) {
-                attacker.isAlive = false;
-            }
-        }
-
-        // 返回伤害明细，便于 Game 侧记录日志
-        return {
-            damage,
-            reduction,
-            actualDamage,
-            reboundToAttacker: reboundApplied,
-            defenderRemaining: this.health,
-            attackerRemaining: attacker.health
-        };
     }
 
     // 清理回合数据

@@ -1,13 +1,12 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-// 移除对前端 ESM 模块的依赖，避免在 Node CJS 环境下 require 失败
-// const { Player } = require('../src/core/Player');
-// const { Game } = require('../src/core/Game');
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import { Player } from '../src/core/Player.js';
+import { Game } from '../src/core/Game.js';
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
+const server = createServer(app);
+const io = new Server(server, {
   cors: {
     origin: '*',
   }
@@ -23,8 +22,13 @@ function getRoomState(roomId) {
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
-      ready: p.ready || false
-    }))
+      ready: p.ready || false,
+      // Include game state if game is running
+      health: p.health,
+      energy: p.energy,
+      isAlive: p.isAlive
+    })),
+    gameStarted: !!room.game
   };
 }
 
@@ -33,9 +37,25 @@ io.on('connection', (socket) => {
 
   socket.on('createRoom', ({ name }) => {
     const roomId = Math.random().toString(36).substring(2, 8);
-    rooms[roomId] = { players: [], game: null };
+    // Initialize server-side game instance
+    const game = new Game();
+    rooms[roomId] = {
+      players: [],
+      game: null, // We keep the 'game' flag for lobby status, but we could use the actual game instance
+      gameInstance: game
+    };
 
     // Add creator as first player
+    // Note: Player class constructor: id, name, health, energy
+    // We use socket.id as ID for mapping, but Player class expects number ID usually? 
+    // Let's check Player.js: constructor(id, name...) -> id can be anything?
+    // Player.js: this.id = id;
+    // However, Game.js addPlayer generates numeric IDs.
+    // For simplicity in this legacy refactor, we keep the room player list separate from Game instance players for now, 
+    // or we try to map them. 
+    // The current frontend manages its own Game instance.
+    // To support "Adjust all players", the server needs to know about players.
+
     const player = { id: socket.id, name, ready: false };
     rooms[roomId].players.push(player);
 
@@ -78,26 +98,28 @@ io.on('connection', (socket) => {
         const allReady = rooms[roomId].players.length >= 2 &&
           rooms[roomId].players.every(p => p.ready);
         if (allReady && !rooms[roomId].game) {
-          // 简化：服务端只广播开始游戏事件，不在服务端运行游戏逻辑
           rooms[roomId].game = { started: true };
+          // Initialize server-side game players if we wanted to run logic here
+          // rooms[roomId].gameInstance.players = ...
           io.to(roomId).emit('gameStarted', getRoomState(roomId));
         }
       }
     }
   });
 
-  // 开发期占位：避免调用不存在的 player.selectAction 导致错误
   socket.on('selectAction', (roomId, actionKey, targetId) => {
-    // 在当前架构中，客户端本地模拟战斗逻辑；这里仅占位/日志
+    // Broadcast action to all (client-side logic handles the rest)
     console.log(`[selectAction] room=${roomId} player=${socket.id} action=${actionKey} target=${targetId}`);
-    // 广播玩家选择给房间内所有成员（用于主机端汇总并结算）
     io.to(roomId).emit('actionSelected', { playerId: socket.id, actionKey, targetId });
   });
 
-  // 新增：主机端结算后，将状态通过服务器转发给房间内所有成员
+  // Host sends the resolved state
   socket.on('roundResolved', (roomId, state) => {
-    console.log(`[roundResolved] room=${roomId} by host=${socket.id} round=${state?.round} state=${state?.state}`);
+    // console.log(`[roundResolved] room=${roomId} by host=${socket.id} round=${state?.round}`);
+    // Broadcast to others
     io.to(roomId).emit('roundResolved', state || {});
+
+    // Update server-side state cache if needed (omitted for now as we rely on host)
   });
 
   socket.on('disconnect', () => {

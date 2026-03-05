@@ -13,9 +13,9 @@ export class GameStateStore {
       this._subs.add(fn);
       return () => this._subs.delete(fn);
     }
-    return () => {};
+    return () => { };
   }
-  _emit() { this._subs.forEach(fn => { try { fn(this.state); } catch(_){} }); }
+  _emit() { this._subs.forEach(fn => { try { fn(this.state); } catch (_) { } }); }
 
   updateState(partial) {
     if (!partial || typeof partial !== 'object') return;
@@ -86,7 +86,7 @@ export class GameStateStore {
           if (sp.name && localByName.has(sp.name)) lp = localByName.get(sp.name);
           else if (sp.id != null && localById.has(sp.id)) lp = localById.get(sp.id);
           if (!lp && sp.name) {
-            try { core.addPlayer(sp.name); lp = core.players.find(p => p.name === sp.name); } catch(_) {}
+            try { core.addPlayer(sp.name); lp = core.players.find(p => p.name === sp.name); } catch (_) { }
           }
           if (lp) {
             if (typeof sp.health === 'number') lp.health = sp.health;

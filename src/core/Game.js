@@ -14,6 +14,7 @@ export class Game {
         this.currentRound = 0;
         this.isRunning = false;
         this.timer = null;
+        this.nextResolveAt = null; // 下次自动结算的目标时间戳，用于倒计时显示
         this.logs = [];
         this.gameState = 'idle'; // idle, selecting, resolving, ended
         this.debugUIManager = null;
@@ -67,6 +68,9 @@ export class Game {
     }
 
     startGame() {
+        // 防止重复开始导致“开始”日志出现两次
+        if (this.isRunning) return;
+
         if (this.players.length < 2) {
             this.addLog('需要至少2名玩家才能开始游戏');
             return;
@@ -87,6 +91,18 @@ export class Game {
                 logs: this.logs,
             });
         }
+
+        // 仅房主自动推进；非房主由网络同步
+        this.clearTimer();
+        const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
+        if (isHost && this.debugUIManager?.isAutoResolve) {
+            this.nextResolveAt = Date.now() + this.roundTime;
+            this.timer = setTimeout(async () => {
+                await this.processRound();
+            }, this.roundTime);
+        } else {
+            this.nextResolveAt = null;
+        }
     }
 
     startRound() {
@@ -97,11 +113,19 @@ export class Game {
 
         this.clearTimer();
         this.nextFrame();
-        // 仅在自动结算下才定时推进
-        if (this.debugUIManager?.isAutoResolve) {
+
+        // 记录新回合开始日志
+        this.addLog(`第 ${this.currentRound} 回合开始`);
+
+        // 仅在房主且自动结算开启时才定时推进
+        const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
+        if (isHost && this.debugUIManager?.isAutoResolve) {
+            this.nextResolveAt = Date.now() + this.roundTime;
             this.timer = setTimeout(async () => {
                 await this.processRound();
             }, this.roundTime);
+        } else {
+            this.nextResolveAt = null;
         }
 
         if (this.debugUIManager) {
@@ -114,23 +138,9 @@ export class Game {
         await this.combatManager.processRound();
     }
 
-    // 保留接口：由 CombatManager 内部直接处理，避免重复逻辑
-    async resolveActions() { /* 迁移至 CombatManager */ }
-    async resolveCombat() { /* 迁移至 CombatManager */ }
-    async finalizeRound() { /* 迁移至 CombatManager */ }
-    executeAttack(attacker, attackee) { /* 迁移至 CombatManager */ }
-
     prepareNextRound() {
-        this.gameState = 'selecting';
-        this.clearTimer();
-        if (this.debugUIManager?.isAutoResolve) {
-            this.timer = setTimeout(async () => {
-                await this.processRound();
-            }, this.roundTime);
-        }
-        if (this.debugUIManager) {
-            this.debugUIManager.updateGameState();
-        }
+        // 改为统一走 startRound，确保回合号递增与日志一致
+        this.startRound();
     }
 
     addLog(message) {
@@ -193,6 +203,7 @@ export class Game {
     endGame() {
         this.isRunning = false;
         this.clearTimer();
+        this.nextResolveAt = null;
         this.gameState = 'ended';
         if (this.debugUIManager) {
             this.debugUIManager.updateGameState();

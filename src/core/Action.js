@@ -1,5 +1,5 @@
 export class Action {
-    constructor(type, level, energyCost, damage = 0, reduction = 0, reboundDamage = 0, name = '', description = '') {
+    constructor(type, level, energyCost, damage = 0, reduction = 0, reboundDamage = 0, name = '', description = '', energyGain = 0) {
         this.type = type;
         this.level = level;
         this.energyCost = energyCost;
@@ -8,6 +8,7 @@ export class Action {
         this.reboundDamage = reboundDamage;
         this.name = name;
         this.description = description;
+        this.energyGain = energyGain;
     }
 
     getActualDamage() {
@@ -41,7 +42,8 @@ export class Action {
             this.reduction,
             this.reboundDamage,
             this.name,
-            this.description
+            this.description,
+            this.energyGain
         );
     }
 }

@@ -156,6 +156,30 @@ button:active {
   border: 3px solid #222;
   border-radius: 14px;
   box-shadow: 6px 6px 0 #222;
+  flex-direction: column; /* 居中布局：状态在上，操作按钮在下 */
+  text-align: center; /* 文本居中 */
+}
+
+/* 操作按钮行容器：保持横向排列与居中 */
+.action-buttons {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 顶部状态与我的状态，采用与对手图案一致的字体与风格 */
+.action-bar-header,
+.action-bar-status {
+  font-family: 'ZCOOL KuaiLe, sans-serif';
+  color: #111;
+}
+.action-bar-header {
+  font-size: 16px;
+}
+.action-bar-status {
+  font-size: 14px;
 }
 
 .action-btn {
@@ -189,6 +213,12 @@ button:active {
 
 .action-btn span {
   font-size: 14px;
+}
+
+/* 耗气字号缩小 */
+.action-btn em.energy {
+  font-size: 12px;
+  color: #555;
 }
 
 /* target overlay removed; direct click in canvas */

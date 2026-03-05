@@ -17,7 +17,7 @@ if (typeof window !== 'undefined') {
 LobbyManager.connect();
 
 // 附加网络同步监听
-(function setupNetworkSync(){
+(function setupNetworkSync() {
   let lastBroadcast = { round: 0, state: '', logs: 0 };
 
   // 当 socket 可用时绑定一次
@@ -41,7 +41,7 @@ LobbyManager.connect();
           (snapshot.players || []).forEach(sp => {
             let lp = byName.get(sp.name);
             if (!lp) {
-              try { core.addPlayer(sp.name); lp = core.players.find(p => p.name === sp.name); } catch(_) {}
+              try { core.addPlayer(sp.name); lp = core.players.find(p => p.name === sp.name); } catch (_) { }
             }
             if (lp) {
               if (typeof sp.health === 'number') lp.health = sp.health;
@@ -52,6 +52,29 @@ LobbyManager.connect();
           if (window.debugUI && typeof window.debugUI.updateGameState === 'function') {
             window.debugUI.updateGameState();
           }
+        }
+      }
+    });
+
+    sock.on('actionSelected', ({ playerId, actionKey, targetId }) => {
+      if (LobbyManager.isHost() && window.game) {
+        const core = window.game;
+        const player = core.players.find(p => p.id === playerId);
+        if (player) {
+            let target = null;
+            if (targetId) {
+                // Try finding by ID first, then name
+                target = core.players.find(p => p.id === targetId || p.name === targetId);
+            }
+            try {
+                player.selectAction(actionKey, target);
+                console.log(`[Host] Synced action for ${player.name}: ${actionKey} -> ${target?.name}`);
+                if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
+                    window.debugUI.updatePlayerList();
+                }
+            } catch (e) {
+                console.warn('[Host] Failed to sync action:', e);
+            }
         }
       }
     });
@@ -214,32 +237,82 @@ for (const path in imageModules) {
 
 function showActionBar() {
   if (!gameCore.isRunning || gameCore.gameState !== 'selecting') return hideActionBar();
-  const me = gameCore.players.find(p => p.id === localPlayerId);
+  const players = gameCore.players || [];
+  const selfId = window.localPlayerId || (players[0]?.id);
+  const me = players.find(p => p.id === selfId);
   if (!me || !me.isAlive) return hideActionBar();
 
-  actionBarEl.classList.remove('hidden');
-  // no target overlay; direct click on opponents in canvas
-
-  // Build buttons for: STORE_1, ATTACK_1, DEFEND_1, REBOUND_1, ATTACK_2 (if exists)
+  // Build availability signature to avoid unnecessary DOM rebuilds
   const keys = ['STORE_1', 'ATTACK_1', 'DEFEND_1', 'REBOUND_1', 'ATTACK_2'].filter(k => ACTIONS[k]);
-  actionBarEl.innerHTML = '';
-  keys.forEach(key => {
-    const cfg = ACTIONS[key];
+  const availability = keys.map(k => {
+    const cfg = ACTIONS[k];
     let can = me.energy >= (cfg.energyCost || 0);
     if (cfg.type === ActionType.ATTACK) {
       const hasTarget = gameCore.players.some(p => p.id !== me.id && p.isAlive);
       can = can && hasTarget;
     }
+    return { k, can };
+  });
+  const sig = JSON.stringify({ round: gameCore.currentRound, meId: me.id, energy: me.energy, availability });
+  if (actionBarEl.dataset && actionBarEl.dataset.sig === sig && !actionBarEl.classList.contains('hidden')) {
+    // Signature unchanged: keep existing buttons, prevent hover/active animation from being retriggered by rebuilds
+    // 更新倒计时与状态文本（无需重建按钮）
+    const header = document.getElementById('action-bar-header');
+    const statusEl = document.getElementById('action-bar-status');
+    const remain = (gameCore.nextResolveAt ? Math.max(0, gameCore.nextResolveAt - Date.now()) : 0);
+    const sec = Math.ceil(remain / 1000);
+    if (header) {
+      header.textContent = `回合 ${gameCore.currentRound} · 状态：选择阶段 · 倒计时：${sec}s`;
+    }
+    if (statusEl) {
+      statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy}`;
+    }
+    return;
+  }
+  if (actionBarEl.dataset) actionBarEl.dataset.sig = sig; else actionBarEl.setAttribute('data-sig', sig);
+
+  actionBarEl.classList.remove('hidden');
+  // Rebuild buttons only when signature changes
+  actionBarEl.innerHTML = '';
+
+  // 顶部状态与倒计时（采用与动作卡片相似的风格）
+  const header = document.createElement('div');
+  header.id = 'action-bar-header';
+  header.className = 'action-bar-header';
+  const remain = (gameCore.nextResolveAt ? Math.max(0, gameCore.nextResolveAt - Date.now()) : 0);
+  const sec = Math.ceil(remain / 1000);
+  header.textContent = `回合 ${gameCore.currentRound} · 状态：选择阶段 · 倒计时：${sec}s`;
+  actionBarEl.appendChild(header);
+
+  // 我的状态与已选动作（风格与对手图案相同）
+  const statusEl = document.createElement('div');
+  statusEl.id = 'action-bar-status';
+  statusEl.className = 'action-bar-status';
+  statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy}`;
+  actionBarEl.appendChild(statusEl);
+
+  // 操作按钮行，横向排列并居中
+  const buttonRow = document.createElement('div');
+  buttonRow.className = 'action-buttons';
+
+  availability.forEach(({ k, can }) => {
+    const cfg = ACTIONS[k];
     const btn = document.createElement('button');
     btn.className = 'action-btn' + (can ? '' : ' disabled');
-    const imgName = key.toLowerCase() + '.jpg';
+    const imgName = k.toLowerCase() + '.jpg';
     const imgSrc = imageMap[imgName] || '';
-    btn.innerHTML = `<img alt="${cfg.name}" src="${imgSrc}"/><span>${cfg.name}</span>`;
+    // 按钮内展示动作名与耗气要求、已选择提示
+    const chosen = (me.currentAction && me.currentAction.name === cfg.name);
+    btn.innerHTML = `<img alt="${cfg.name}" src="${imgSrc}"/><span>${cfg.name}</span><em class="energy">耗气:${cfg.energyCost}</em>`;
     if (can) {
-      btn.onclick = () => onChooseAction(me, key);
+      btn.onclick = () => onChooseAction(me, k);
     }
-    actionBarEl.appendChild(btn);
+    buttonRow.appendChild(btn);
   });
+
+  actionBarEl.appendChild(buttonRow);
+
+  // 移除“立即结算”按钮：玩家不应控制其他玩家的结算时机
 }
 
 function hideActionBar() {
@@ -289,12 +362,13 @@ function onChooseAction(player, actionKey) {
   if (cfg.type === ActionType.ATTACK) {
     window.pendingAttack = { selfId: player.id, actionKey };
   } else {
-    LobbyManager.socket.emit('selectAction', LobbyManager.roomId, actionKey, null);
+    // 将行动选择同步到本地核心（保证倒计时栏能显示“已选”）并广播到服务器
     try {
       player.selectAction(actionKey, null);
       debugUI.updatePlayerList();
-      showActionBar();
     } catch (e) { showToast(e.message); }
+    LobbyManager.socket.emit('selectAction', LobbyManager.roomId, actionKey, null);
+    showActionBar();
   }
 }
 
@@ -316,11 +390,12 @@ function renderLobby() {
 
   const allReady = LobbyManager.allReady();
   lobbyStatusEl.textContent = allReady ? '所有玩家已准备！即将开始...' : (LobbyManager.connected ? '等待所有玩家准备...' : '未连接，无法开始');
-  if (allReady) setTimeout(startGame, 600);
+  // 仅房主触发开始，避免非房主重复开始导致两次“开始”日志
+  if (allReady && (LobbyManager.isHost && LobbyManager.isHost())) setTimeout(startGame, 600);
 }
 
 // 连接状态文案与“离线房间”入口
-(function bindConnectionUI(){
+(function bindConnectionUI() {
   const refresh = () => {
     if (!connStatus) return;
     if (LobbyManager.connected) {
@@ -353,7 +428,7 @@ startBtn?.addEventListener('click', async () => {
     renderLobby();
   };
 
-  const askNameThen = (cb) => openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => cb(playerName), () => {});
+  const askNameThen = (cb) => openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => cb(playerName), () => { });
 
   if (LobbyManager.connected) {
     // 已连接：走在线流程
@@ -418,7 +493,8 @@ function startGame() {
   // Avoid duplicate players when starting via different paths
   gameCore.players = [];
   LobbyManager.list().forEach(p => gameCore.addPlayer(p.name, { isBot: !!p.isBot }));
-  gameCore.startGame();
+  // 防重复：若已运行则不再重复 start
+  if (!gameCore.isRunning) gameCore.startGame();
   // Start Phaser GameScene on demand
   if (!phaserGame.scene.isActive('GameScene')) {
     phaserGame.scene.start('GameScene');
@@ -433,7 +509,14 @@ function startGame() {
     localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
   }
   window.localPlayerId = localPlayerId;
+  let lastRound = gameCore.currentRound;
   const syncUI = () => {
+    // 回合推进：进入新一轮选择阶段时清理待选目标状态，避免显示旧的“(待选目标)”
+    if (gameCore.gameState === 'selecting' && gameCore.currentRound !== lastRound) {
+      window.pendingAttack = null;
+      lastRound = gameCore.currentRound;
+    }
+
     if (gameCore.gameState === 'selecting') {
       showActionBar();
     } else {

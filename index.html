@@ -71,6 +71,36 @@
 
       <!-- In-game Action Bar (visible during gameplay) -->
       <div id="action-bar" class="interactive hidden"></div>
+
+      <!-- Debug Panel (host-visible by default; can be forced via togglevisibility) -->
+      <div id="debug-panel" class="interactive"
+        style="position: fixed; right: 12px; top: 12px; z-index: 1100; background: #fff; color: #333; border: 2px solid #000; border-radius: 10px; padding: 10px 12px; box-shadow: 4px 4px 0 #000; min-width: 200px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <strong style="font-size:14px;">Debug 控制台</strong>
+        </div>
+        <div style="font-size:12px; color:#666; margin-bottom:4px;">(Ctrl+Shift+D 切换显示)</div>
+        <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px;">
+          <input id="debug-auto-checkbox" type="checkbox" /> 自动结算
+        </label>
+        <button id="debug-resolve-btn" class="interactive"
+          style="margin-top:8px; background:#27ae60; color:#fff; width:100%;">立即结算</button>
+
+        <!-- Player Stats Adjustment -->
+        <div style="margin-top:8px; border-top:1px solid #ddd; padding-top:8px;">
+          <div style="font-size:12px; font-weight:bold; margin-bottom:4px;">调整数值</div>
+          <div style="display:flex; gap:4px; margin-bottom:4px;">
+            <input id="debug-pid" type="number" placeholder="ID" style="width:40px; padding:2px;">
+            <select id="debug-prop" style="flex:1;">
+              <option value="health">血量</option>
+              <option value="energy">气</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <input id="debug-val" type="number" placeholder="数值" style="width:60px; padding:2px;">
+            <button id="debug-set-btn" class="interactive" style="background:#3498db; color:#fff; flex:1;">设置</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>

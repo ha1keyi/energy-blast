@@ -363,7 +363,10 @@ export class GameScene extends Phaser.Scene {
         const panelWidth = 420;
         const panelHeight = 170;
         const x = width - panelWidth - 20;
-        const y = height - panelHeight - 100;
+        // Move panel up to avoid overlapping with Player HUD (height - 80)
+        // Previous: height - panelHeight - 100 -> height - 270 (overlaps with height - 120..-40)
+        // New: height - panelHeight - 160 -> height - 330 (clear of height - 120)
+        const y = height - panelHeight - 160;
 
         const bg = this.add.rectangle(x, y, panelWidth, panelHeight, 0xffffff, 0.95)
             .setStrokeStyle(3, 0x000000)

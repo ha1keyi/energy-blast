@@ -27,7 +27,12 @@ export class CombatManager {
     // Validate selections; if someone has no action, default to defend (energy cost 0 assumed) to keep flow robust
     players.forEach(p => {
       if (!p.currentAction) {
-        try { p.selectAction('DEFEND', null); } catch(_) {}
+        try {
+          console.log(`[Combat] Player ${p.name} has no action, defaulting to STORE_1`);
+          p.selectAction('STORE_1', null);
+        } catch (e) {
+          console.warn(`[Combat] Failed to set default action for ${p.name}:`, e);
+        }
       }
     });
 
@@ -37,17 +42,22 @@ export class CombatManager {
       if (!attacker.currentAction) return;
       if (attacker.currentAction.type === ActionType.ATTACK) {
         const target = attacker.target;
-        if (target && target.isAlive) {
+        // Debug log
+        console.log(`[Combat] ${attacker.name} attacking ${target?.name || 'null'} (target type: ${typeof target})`);
+
+        if (target && typeof target === 'object' && target.isAlive) {
           const strategy = StrategyFactory.getStrategyForActions(attacker.currentAction, target.currentAction);
           const result = strategy.execute(attacker, target);
           if (result && result.message) logs.push(result.message);
+        } else {
+          console.warn(`[Combat] Target invalid or dead:`, target);
         }
       }
     });
 
     // Post-resolution: adjust energy, clear selections
     players.forEach(p => {
-      try { p.adjustEnergy(); } catch(_) {}
+      try { p.adjustEnergy(); } catch (_) { }
       p.resetRound?.();
     });
 
