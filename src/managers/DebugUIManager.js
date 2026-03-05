@@ -7,7 +7,9 @@ export class DebugUIManager {
     this.game = game;
     this.isAutoResolve = true; // keep auto resolve default
     this.visible = false;
-    this.forcedVisible = false; // 允许通过命令强制显示
+    this.isCollapsed = false;
+    this._editorBound = false;
+    this._editorSignature = '';
   }
 
   startUpdating() {
@@ -18,7 +20,7 @@ export class DebugUIManager {
     // 绑定面板控件与全局命令
     this.attachControls();
     if (typeof window !== 'undefined') {
-      window.toggleDebugPanel = () => { this.toggleVisibility(); };
+      window.toggleDebugPanel = () => { this.toggleCollapsed(); };
       window.togglevisibility = window.toggleDebugPanel; // 兼容旧命令
       window.setAutoResolve = (val) => { this.setAutoResolve(val); this.updateVisibility(); };
       window.resolveNow = async () => { if (this.game?.processRound) await this.game.processRound(); };
@@ -29,10 +31,15 @@ export class DebugUIManager {
       document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
           e.preventDefault();
-          this.toggleVisibility();
+          this.toggleCollapsed();
         }
       });
     }
+
+    // Keep debug data panel fresh while visible.
+    setInterval(() => {
+      this.renderPlayerEditor();
+    }, 350);
   }
 
   updateVisibility() {
@@ -45,11 +52,10 @@ export class DebugUIManager {
     }
   }
 
-  toggleVisibility() {
+  toggleCollapsed() {
     if (!(!!LobbyManager.roomId && LobbyManager.isHost())) return;
-    this.forcedVisible = !this.forcedVisible;
-    this.updateVisibility();
-    // debug visibility toggled
+    this.isCollapsed = !this.isCollapsed;
+    this.applyCollapsedState();
   }
 
   setAutoResolve(val) {
@@ -74,6 +80,12 @@ export class DebugUIManager {
   attachControls() {
     const panel = document.getElementById('debug-panel');
     if (!panel) return; // 没有面板节点则跳过
+
+    const collapseBtn = document.getElementById('debug-collapse-btn');
+    if (collapseBtn) {
+      collapseBtn.onclick = () => this.toggleCollapsed();
+    }
+
     const checkbox = document.getElementById('debug-auto-checkbox');
     if (checkbox) {
       checkbox.checked = this.isAutoResolve;
@@ -84,37 +96,105 @@ export class DebugUIManager {
       resolveBtn.onclick = async () => { if (this.game?.processRound) await this.game.processRound(); };
     }
 
-    // Player Stats Adjustment
-    const setBtn = document.getElementById('debug-set-btn');
-    if (setBtn) {
-      setBtn.onclick = () => {
-        const pidInput = document.getElementById('debug-pid');
-        const propInput = document.getElementById('debug-prop');
-        const valInput = document.getElementById('debug-val');
-
-        if (!pidInput || !propInput || !valInput) return;
-
-        const pid = parseInt(pidInput.value);
-        const prop = propInput.value;
-        const val = parseInt(valInput.value);
-
-        if (isNaN(pid) || isNaN(val)) {
-          alert('请输入有效的ID和数值');
-          return;
-        }
-
-        const player = this.game.players.find(p => p.id === pid);
-        if (player) {
-          if (prop === 'health') player.health = val;
-          if (prop === 'energy') player.energy = val;
-          // Force update
-          this.game.nextFrame();
-          if (typeof window.showToast === 'function') window.showToast(`已更新玩家 ${player.name} ${prop} = ${val}`);
-        } else {
-          alert('未找到该ID的玩家');
-        }
-      };
+    const refreshBtn = document.getElementById('debug-refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.onclick = () => this.renderPlayerEditor(true);
     }
+
+    this.bindPlayerEditorEvents();
+    this.applyCollapsedState();
+    this.renderPlayerEditor(true);
+  }
+
+  applyCollapsedState() {
+    const body = document.getElementById('debug-panel-body');
+    const btn = document.getElementById('debug-collapse-btn');
+    if (!body || !btn) return;
+    body.style.display = this.isCollapsed ? 'none' : '';
+    btn.textContent = this.isCollapsed ? '展开' : '收起';
+  }
+
+  bindPlayerEditorEvents() {
+    if (this._editorBound) return;
+    const editor = document.getElementById('debug-player-editor');
+    if (!editor) return;
+
+    editor.addEventListener('change', (ev) => {
+      const target = ev.target;
+      const row = target?.closest?.('[data-player-id]');
+      if (!row) return;
+      const playerId = Number(row.getAttribute('data-player-id'));
+      const player = this.game?.players?.find?.(p => p.id === playerId);
+      if (!player) return;
+
+      const field = target.getAttribute('data-field');
+      if (!field) return;
+
+      if (field === 'name') player.name = (target.value || '').trim() || player.name;
+      if (field === 'health') player.health = Number(target.value || player.health);
+      if (field === 'energy') player.energy = Number(target.value || player.energy);
+      if (field === 'score') player.score = Number(target.value || player.score || 0);
+      if (field === 'isAlive') player.isAlive = !!target.checked;
+      if (field === 'isBot') player.isBot = !!target.checked;
+
+      this.game?.nextFrame?.();
+      this.renderPlayerEditor(true);
+    });
+
+    this._editorBound = true;
+  }
+
+  renderPlayerEditor(force = false) {
+    const editor = document.getElementById('debug-player-editor');
+    if (!editor || !this.visible || this.isCollapsed) return;
+
+    const players = this.game?.players || [];
+    const signature = JSON.stringify(players.map(p => ({
+      id: p.id,
+      name: p.name,
+      hp: p.health,
+      en: p.energy,
+      alive: p.isAlive,
+      bot: !!p.isBot,
+      score: p.score || 0,
+      action: p.currentAction?.name || '',
+      target: p.target?.name || '',
+    })));
+    if (!force && signature === this._editorSignature) return;
+    this._editorSignature = signature;
+
+    if (!players.length) {
+      editor.innerHTML = '<div style="font-size:12px;color:#666;">暂无玩家数据</div>';
+      return;
+    }
+
+    const rows = players.map((p) => `
+      <tr data-player-id="${p.id}">
+        <td>${p.id}</td>
+        <td><input data-field="name" value="${String(p.name || '').replace(/"/g, '&quot;')}" /></td>
+        <td><input data-field="health" type="number" value="${Number(p.health ?? 0)}" /></td>
+        <td><input data-field="energy" type="number" value="${Number(p.energy ?? 0)}" /></td>
+        <td><input data-field="score" type="number" value="${Number(p.score ?? 0)}" /></td>
+        <td><input data-field="isAlive" type="checkbox" ${p.isAlive ? 'checked' : ''} /></td>
+        <td><input data-field="isBot" type="checkbox" ${p.isBot ? 'checked' : ''} /></td>
+        <td>${p.currentAction?.name || '-'}</td>
+        <td>${p.target?.name || '-'}</td>
+      </tr>
+    `).join('');
+
+    editor.innerHTML = `
+      <div class="debug-table-wrap">
+        <table class="debug-player-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>名字</th><th>血</th><th>气</th><th>分</th><th>存活</th><th>Bot</th><th>行动</th><th>目标</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;color:#666;margin-top:4px;">修改任意单元格后将立即生效</div>
+    `;
   }
 
   updatePlayerList() {
@@ -122,7 +202,7 @@ export class DebugUIManager {
   }
 
   updateGameState() {
-    // no-op placeholder
+    this.renderPlayerEditor();
   }
 
   // Hook: host collects remote actions to drive resolution
