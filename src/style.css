@@ -101,6 +101,54 @@ button:active {
   box-shadow: 0 0 0 #222;
 }
 
+.home-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.home-room-input,
+.join-room-form input {
+  width: min(100%, 280px);
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 3px solid #222;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: #222;
+}
+
+.join-room-form {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.room-meta {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 2px dashed #222;
+  border-radius: 12px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.room-meta #room-id-display {
+  font-size: 16px;
+  color: #111;
+}
+
+.room-meta #room-link-display {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #555;
+  word-break: break-all;
+}
+
 .player-list-container {
   min-height: 150px;
   border: 2px dashed #999;
@@ -187,6 +235,7 @@ button:active {
 
 .action-bar-status {
   font-size: 14px;
+  line-height: 1.45;
 }
 
 .action-btn {
@@ -339,6 +388,11 @@ button:active {
 
   .action-bar-status {
     font-size: 12px;
+  }
+
+  .home-room-input,
+  .join-room-form input {
+    width: 100%;
   }
 
   .action-buttons {

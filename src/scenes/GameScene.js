@@ -1,8 +1,6 @@
 // src/scenes/GameScene.js
 import Phaser from 'phaser';
-import { GameClient } from '../core/GameClient.js';
 import { LobbyManager } from '../managers/LobbyManager.js';
-import { GameStateStore } from '../core/GameStateStore.js';
 
 // Resolve action images via Vite eager glob
 const actionImages = import.meta.glob('../assets/images/*.jpg', { eager: true });
@@ -47,14 +45,6 @@ export class GameScene extends Phaser.Scene {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000', backgroundColor: '#fff'
         }).setOrigin(0.5).setDepth(20).setVisible(false);
 
-        // Use LobbyManager's socket and roomId instead of undefined globals
-        const socket = LobbyManager.socket;
-        const roomId = LobbyManager.roomId || 'default';
-        if (!socket) {
-            console.warn('[GameScene] Socket not connected yet. GameClient listeners will attach after connection.');
-        }
-        this.gameClient = new GameClient(socket, roomId);
-
         // 新增：结算表现管理器（在 window.game 就绪后挂载）
         const core = this.getCore && this.getCore();
         if (core) {
@@ -80,7 +70,7 @@ export class GameScene extends Phaser.Scene {
         this.endAutoReturnTimer = null;
 
         // 去重：仅保留一个定时器轮询 HUD / 日志 / 待选提示
-        this.time.addEvent({
+        this.uiRefreshEvent = this.time.addEvent({
             delay: 300,
             loop: true,
             callback: () => {
@@ -91,6 +81,9 @@ export class GameScene extends Phaser.Scene {
                 this.updateEndScreen();
             }
         });
+
+        this.events.once('shutdown', () => this.cleanupScene());
+        this.events.once('destroy', () => this.cleanupScene());
     }
 
     update() { }
@@ -232,6 +225,38 @@ export class GameScene extends Phaser.Scene {
         if (typeof window.returnToLobby === 'function') {
             window.returnToLobby();
         }
+    }
+
+    cleanupScene() {
+        if (this.uiRefreshEvent) {
+            this.uiRefreshEvent.remove(false);
+            this.uiRefreshEvent = null;
+        }
+        if (this.endAutoReturnTimer) {
+            this.endAutoReturnTimer.remove(false);
+            this.endAutoReturnTimer = null;
+        }
+        if (this.roundResolutionManager && typeof this.roundResolutionManager.cleanup === 'function') {
+            this.roundResolutionManager.cleanup();
+            this.roundResolutionManager = null;
+        }
+        const core = this.getCore && this.getCore();
+        if (core?.roundResolutionManager && typeof core.roundResolutionManager.cleanup === 'function') {
+            core.roundResolutionManager.cleanup();
+            core.roundResolutionManager = null;
+        }
+        this.hudItems?.forEach(item => item?.destroy?.());
+        this.hudItems = [];
+        this.actionSprites?.forEach(item => item?.destroy?.());
+        this.actionSprites = [];
+        this.pendingHint?.destroy?.();
+        this.pendingHint = null;
+        this.battleLogContainer?.removeAll?.(true);
+        this.battleLogContainer?.destroy?.();
+        this.battleLogContainer = null;
+        this.endScreenContainer?.removeAll?.(true);
+        this.endScreenContainer?.destroy?.();
+        this.endScreenContainer = null;
     }
 
     handleRematch() {
@@ -476,8 +501,8 @@ export class GameScene extends Phaser.Scene {
             me.selectAction(pending.actionKey, target);
             // 同步给可能存在的服务器（占位）
             if (LobbyManager?.socket && LobbyManager?.roomId) {
-                const targetName = target?.name || targetPlayer?.name;
-                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetName);
+                const targetNetworkId = target?.networkId ?? target?.id ?? targetPlayer?.id;
+                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetNetworkId);
             }
             if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
                 window.debugUI.updatePlayerList();

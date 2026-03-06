@@ -1,18 +1,16 @@
 // src/managers/RoundResolutionManager.js
-// Visualizes chosen actions during the resolving phase and can show simple results.
-// Expected to be dynamically imported and instantiated from GameScene.
+// Visualizes chosen actions during the resolving phase with explicit lifecycle cleanup.
 
 export class RoundResolutionManager {
   constructor(core, scene) {
     this.core = core;
     this.scene = scene;
-    this.sprites = [];
+    this.nodes = [];
+    this.timers = [];
     this._active = true;
+    this._signature = '';
 
-    // Periodically refresh display following GameScene's polling cadence
-    this.timer = this.scene.time.addEvent({ delay: 300, loop: true, callback: () => this.refresh() });
-
-    // Cleanup on scene shutdown/destroy
+    this.timer = this.scene.time.addEvent({ delay: 220, loop: true, callback: () => this.refresh() });
     this.scene.events.on('shutdown', this.cleanup, this);
     this.scene.events.on('destroy', this.cleanup, this);
   }
@@ -20,201 +18,170 @@ export class RoundResolutionManager {
   cleanup() {
     if (!this._active) return;
     this._active = false;
-    if (this.timer) { this.timer.remove(false); this.timer = null; }
+    if (this.timer) {
+      this.timer.remove(false);
+      this.timer = null;
+    }
+    this.timers.forEach(timer => timer?.remove?.(false));
+    this.timers = [];
     this.clearSprites();
+    this._signature = '';
+  }
+
+  trackNode(node) {
+    if (node) this.nodes.push(node);
+    return node;
+  }
+
+  trackTimer(timer) {
+    if (timer) this.timers.push(timer);
+    return timer;
   }
 
   refresh() {
     const core = this.core;
     if (!core || !this._active) return;
 
-    // 当游戏结束时，确保已生成的特效不会被立即清除，
-    // 而是允许它们自然播放完毕（通过 tween 或 timer）。
-    // 只有当进入 idle/selecting 状态时才强制清理。
-    const shouldShow = (core.gameState === 'resolving' || core.gameState === 'ended');
+    const shouldShow = core.gameState === 'resolving' || core.gameState === 'ended';
     if (!shouldShow) {
-      // Hide when not resolving or ended
-      if (this.sprites.length) this.clearSprites();
+      this.clearSprites();
+      this._signature = '';
       return;
     }
 
-    // Only build if not already built for this resolution step
-    // 注意：如果是 ended 状态，通常是在 resolving 之后，所以 sprite 应该已经存在
-    // 如果 resolving 期间没有构建（比如直接结束），这里可以构建
-    if (this.sprites.length === 0 && core.gameState === 'resolving') {
-      this.buildSprites();
-    } else if (core.gameState === 'resolving' && this.sprites.length > 0) {
-      // Rebuild once per resolve step when actions changed.
-      const hasAnyAction = (core.players || []).some(p => !!p.currentAction);
-      if (!hasAnyAction) {
-        this.clearSprites();
-      }
-    }
+    const signature = JSON.stringify((core.players || []).map(player => ({
+      id: player.networkId ?? player.id,
+      action: player.currentAction?.name || '',
+      type: player.currentAction?.type || '',
+      level: player.currentAction?.level || 0,
+      target: player.target?.networkId ?? player.target?.id ?? null,
+      state: core.gameState,
+      round: core.currentRound,
+    })));
+
+    if (signature === this._signature) return;
+    this._signature = signature;
+    this.clearSprites();
+    this.buildSprites();
   }
 
   clearSprites() {
-    this.sprites.forEach(s => s?.destroy());
-    this.sprites = [];
+    this.nodes.forEach(node => node?.destroy?.());
+    this.nodes = [];
+    this.timers.forEach(timer => timer?.remove?.(false));
+    this.timers = [];
   }
 
   buildSprites() {
     const core = this.core;
     const { width, height } = this.scene.scale;
-
     const players = core.players || [];
     if (!players.length) return;
 
-    const selfId = (window && window.localPlayerId) || (players[0]?.id);
-    const self = players.find(p => p.id === selfId);
-    const others = players.filter(p => p.id !== selfId);
-
+    const selfId = (window && window.localPlayerId) || players[0]?.id;
+    const self = players.find(player => player.id === selfId);
+    const others = players.filter(player => player.id !== selfId);
     const positions = this.computePositions(others.length, width, height);
 
-    // Opponents' action icons
-    const tinyEnemyMarkers = [];
-    others.forEach((p, i) => {
-      if (i >= positions.length) return;
-      const action = p.currentAction;
-      const key = this.getActionImageKey(action);
+    others.forEach((player, index) => {
+      const position = positions[index];
+      if (!position || !player.currentAction) return;
+      const key = this.getActionImageKey(player.currentAction);
       if (!key) return;
-      const pos = positions[i];
-      const sprite = this.scene.add.image(pos.x, pos.y, key)
-        .setDisplaySize(50, 50)
-        .setDepth(12)
-        .setOrigin(0.5)
-        .setAlpha(0)
-        .setScale(0.85);
-      this.sprites.push(sprite);
-      this.scene.tweens.add({ targets: sprite, alpha: 1, scale: 1, duration: 180, ease: 'Quad.easeOut' });
-      tinyEnemyMarkers.push({ key, idx: i });
 
-      // 添加黑白手绘风格特效
-      this.playActionEffect(p, pos.x, pos.y);
+      const sprite = this.trackNode(this.scene.add.image(position.x, position.y, key)
+        .setDisplaySize(84, 84)
+        .setDepth(22)
+        .setOrigin(0.5));
+      const targetScale = sprite.scaleX;
+      sprite.setScale(0).setAlpha(0);
+      this.scene.tweens.add({ targets: sprite, alpha: 1, scale: targetScale, duration: 180, ease: 'Quad.easeOut' });
+      this.playActionEffect(player, position.x, position.y);
     });
 
-    // Self action icon (near bottom center)
-    if (self) {
-      const action = self.currentAction;
-      const key = this.getActionImageKey(action);
+    if (self?.currentAction) {
+      const key = this.getActionImageKey(self.currentAction);
       if (key) {
+        const selfSize = Math.max(140, Math.min(width * 0.26, 220));
         const sx = width / 2;
-        const sy = Math.max(100, height - 160);
-        const sprite = this.scene.add.image(sx, sy, key)
-          .setDisplaySize(58, 58)
-          .setDepth(13)
-          .setOrigin(0.5)
-          .setAlpha(0)
-          .setScale(0.85);
-        this.sprites.push(sprite);
-        this.scene.tweens.add({ targets: sprite, alpha: 1, scale: 1, duration: 180, ease: 'Quad.easeOut' });
-
-        // Overlay tiny enemy action markers above self icon to make opponents' actions always visible.
-        const markerCount = Math.min(4, tinyEnemyMarkers.length);
-        for (let i = 0; i < markerCount; i++) {
-          const marker = tinyEnemyMarkers[i];
-          const spacing = 22;
-          const mx = sx + (i - (markerCount - 1) / 2) * spacing;
-          const my = sy - 52;
-          const tiny = this.scene.add.image(mx, my, marker.key)
-            .setDisplaySize(24, 24)
-            .setDepth(14)
-            .setOrigin(0.5)
-            .setAlpha(0)
-            .setScale(0.9);
-          this.sprites.push(tiny);
-          this.scene.tweens.add({ targets: tiny, alpha: 1, scale: 1, duration: 140, ease: 'Quad.easeOut', delay: i * 40 });
-        }
-
-        // 添加黑白手绘风格特效
+        const sy = height - selfSize * 0.42;
+        const sprite = this.trackNode(this.scene.add.image(sx, sy, key)
+          .setDisplaySize(selfSize, selfSize)
+          .setDepth(23)
+          .setOrigin(0.5));
+        const targetScale = sprite.scaleX;
+        sprite.setScale(0).setAlpha(0);
+        this.scene.tweens.add({ targets: sprite, alpha: 1, scale: targetScale, duration: 180, ease: 'Quad.easeOut' });
         this.playActionEffect(self, sx, sy);
       }
     }
   }
 
-  // 播放黑白手绘风格特效
   playActionEffect(player, x, y) {
     const action = player.currentAction;
     if (!action) return;
 
-    const { width, height } = this.scene.scale;
-    const type = action.type;
-
-    if (type === 'ATTACK') {
-      // 攻击特效：黑白线条冲击波
+    if (action.type === 'ATTACK') {
       const target = player.target;
-      if (target) {
-        // 找到目标的位置（如果是自己，在底部；如果是别人，在 positions 中）
-        const targetPos = this.getPlayerPosition(target);
-        if (targetPos) {
-          this.createLineBlast(x, y, targetPos.x, targetPos.y);
-        }
-      }
-    } else if (type === 'DEFEND' || type === 'REBOUND') {
-      // 防御/反弹特效：手绘圆圈盾牌
+      if (!target) return;
+      const targetPos = this.getPlayerPosition(target);
+      if (targetPos) this.createLineBlast(x, y, targetPos.x, targetPos.y);
+      return;
+    }
+
+    if (action.type === 'DEFEND' || action.type === 'REBOUND') {
       this.createSketchShield(x, y);
-    } else if (action.energyGain > 0) {
-      // 储气特效：向上升起的线条
+      return;
+    }
+
+    if (action.energyGain > 0) {
       this.createEnergyRise(x, y);
     }
   }
 
   getPlayerPosition(player) {
-    const core = this.core;
-    const players = core.players || [];
-    const selfId = (window && window.localPlayerId) || (players[0]?.id);
+    const players = this.core.players || [];
+    const selfId = (window && window.localPlayerId) || players[0]?.id;
     const { width, height } = this.scene.scale;
 
     if (player.id === selfId) {
-      return { x: width / 2, y: height - 80 };
+      return { x: width / 2, y: height - 120 };
     }
 
     const others = players.filter(p => p.id !== selfId);
-    const idx = others.findIndex(p => p.id === player.id);
-    if (idx === -1) return null;
-
-    const positions = this.computePositions(others.length, width, height);
-    return positions[idx] || null;
+    const index = others.findIndex(p => p.id === player.id);
+    if (index === -1) return null;
+    return this.computePositions(others.length, width, height)[index] || null;
   }
 
   createLineBlast(x1, y1, x2, y2) {
-    const lineCount = 5;
-
-    for (let i = 0; i < lineCount; i++) {
-      this.scene.time.addEvent({
-        delay: i * 50,
+    for (let i = 0; i < 4; i++) {
+      this.trackTimer(this.scene.time.addEvent({
+        delay: i * 45,
         callback: () => {
-          const graphics = this.scene.add.graphics().setDepth(15);
+          const graphics = this.trackNode(this.scene.add.graphics().setDepth(24));
           graphics.lineStyle(2, 0x000000, 1);
-          // 稍微随机化线条位置，模拟手绘感
-          const ox = (Math.random() - 0.5) * 20;
-          const oy = (Math.random() - 0.5) * 20;
+          const ox = (Math.random() - 0.5) * 16;
+          const oy = (Math.random() - 0.5) * 16;
           graphics.beginPath();
           graphics.moveTo(x1 + ox, y1 + oy);
           graphics.lineTo(x2 + ox, y2 + oy);
           graphics.strokePath();
-
-          this.scene.tweens.add({
-            targets: graphics,
-            alpha: 0,
-            duration: 300,
-            onComplete: () => graphics.destroy()
-          });
+          this.scene.tweens.add({ targets: graphics, alpha: 0, duration: 220, onComplete: () => graphics.destroy() });
         }
-      });
+      }));
     }
   }
 
   createSketchShield(x, y) {
-    const graphics = this.scene.add.graphics().setDepth(15);
+    const graphics = this.trackNode(this.scene.add.graphics().setDepth(24));
     graphics.lineStyle(3, 0x000000, 1);
-
-    // 绘制多个不规则圆圈模拟手绘盾牌
     for (let i = 0; i < 3; i++) {
-      const radius = 40 + i * 5;
+      const radius = 34 + i * 7;
       graphics.beginPath();
-      for (let angle = 0; angle < 360; angle += 10) {
+      for (let angle = 0; angle < 360; angle += 12) {
         const rad = angle * (Math.PI / 180);
-        const r = radius + (Math.random() - 0.5) * 10;
+        const r = radius + (Math.random() - 0.5) * 8;
         const px = x + Math.cos(rad) * r;
         const py = y + Math.sin(rad) * r;
         if (angle === 0) graphics.moveTo(px, py);
@@ -223,32 +190,25 @@ export class RoundResolutionManager {
       graphics.closePath();
       graphics.strokePath();
     }
-
-    this.scene.tweens.add({
-      targets: graphics,
-      alpha: 0,
-      scale: 1.2,
-      duration: 500,
-      onComplete: () => graphics.destroy()
-    });
+    this.scene.tweens.add({ targets: graphics, alpha: 0, scale: 1.12, duration: 420, onComplete: () => graphics.destroy() });
   }
 
   createEnergyRise(x, y) {
     for (let i = 0; i < 8; i++) {
-      const line = this.scene.add.line(
-        x + (Math.random() - 0.5) * 40,
+      const line = this.trackNode(this.scene.add.line(
+        x + (Math.random() - 0.5) * 34,
         y,
-        0, 0, 0, -20,
-        0x000000
-      ).setDepth(15).setLineWidth(2);
+        0, 0, 0, -24,
+        0x000000,
+      ).setDepth(24).setLineWidth(2));
 
       this.scene.tweens.add({
         targets: line,
-        y: y - 50,
+        y: y - 44,
         alpha: 0,
-        duration: 600,
-        delay: Math.random() * 300,
-        onComplete: () => line.destroy()
+        duration: 520,
+        delay: Math.random() * 180,
+        onComplete: () => line.destroy(),
       });
     }
   }
@@ -257,20 +217,18 @@ export class RoundResolutionManager {
     if (!action) return null;
     const type = (action.type || '').toLowerCase();
     const level = action.level || 1;
-    const key = `${type}_${level}.jpg`;
-    // GameScene preloads all images by filename as keys, so we can directly use them
-    return key;
+    return `${type}_${level}.jpg`;
   }
 
   computePositions(count, width, height) {
     const positions = [];
     if (count <= 0) return positions;
-    const marginX = 100;
-    const topY = 120;
+    const marginX = 96;
+    const topY = 124;
     const rightX = width - marginX;
     const leftX = marginX;
-    const sideTopY = 130;
-    const sideBottomY = height * 0.75 - 40;
+    const sideTopY = 138;
+    const sideBottomY = height * 0.68;
 
     const topCount = Math.ceil(count / 3);
     const rightCount = Math.floor((count - topCount) / 2);
@@ -278,25 +236,21 @@ export class RoundResolutionManager {
 
     for (let i = 0; i < topCount; i++) {
       const t = (i + 1) / (topCount + 1);
-      const x = marginX + t * (width - marginX * 2);
-      positions.push({ x, y: topY });
+      positions.push({ x: marginX + t * (width - marginX * 2), y: topY });
     }
     for (let i = 0; i < rightCount; i++) {
       const t = (i + 1) / (rightCount + 1);
-      const y = sideTopY + t * (sideBottomY - sideTopY);
-      positions.push({ x: rightX, y });
+      positions.push({ x: rightX, y: sideTopY + t * (sideBottomY - sideTopY) });
     }
     for (let i = 0; i < leftCount; i++) {
       const t = (i + 1) / (leftCount + 1);
-      const y = sideTopY + t * (sideBottomY - sideTopY);
-      positions.push({ x: leftX, y });
+      positions.push({ x: leftX, y: sideTopY + t * (sideBottomY - sideTopY) });
     }
 
     return positions;
   }
 
-  // Reserved API: show actions alongside result texts (can be extended later)
   showActionsAndResults(results = []) {
-    // Results could be animated text near icons; kept minimal for now
+    return results;
   }
 }
