@@ -13,8 +13,47 @@ class LobbyManagerImpl {
     this.roomId = null;
     this.socket = null;
     this.playerId = null;
+    this.playerName = '';
     this.connected = false;
+    this.gameStarted = false;
     this._pendingAction = null; // Action to run upon connection
+    this._sessionKey = 'energy-blast-room-session';
+  }
+
+  _readSession() {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.sessionStorage.getItem(this._sessionKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _writeSession(partial = {}) {
+    if (typeof window === 'undefined') return;
+    const next = {
+      ...this._readSession(),
+      roomId: this.roomId || '',
+      name: this.playerName || '',
+      gameStarted: !!this.gameStarted,
+      ...partial,
+    };
+    if (!next.roomId || !next.name) return;
+    try {
+      window.sessionStorage.setItem(this._sessionKey, JSON.stringify(next));
+    } catch (_) { }
+  }
+
+  clearSession() {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.removeItem(this._sessionKey);
+    } catch (_) { }
+  }
+
+  getSavedSession() {
+    return this._readSession();
   }
 
   _isNgrokHost(hostname) {
@@ -74,6 +113,7 @@ class LobbyManagerImpl {
       console.info('Socket connected:', this.socket.id);
       this.playerId = this.socket.id;
       this.connected = true; // 标记为已连接
+      this._writeSession({});
 
       // Execute any pending action
       if (this._pendingAction) {
@@ -99,6 +139,10 @@ class LobbyManagerImpl {
       console.warn('[Lobby error]', msg);
       // 清理 roomId，保持在首页或当前界面
       this.roomId = null;
+      this.gameStarted = false;
+      if (String(msg || '').includes('Room not found')) {
+        this.clearSession();
+      }
       if (typeof window !== 'undefined' && window.showToast) {
         try { window.showToast(`加入失败：${msg}`); } catch (_) { }
       }
@@ -109,6 +153,10 @@ class LobbyManagerImpl {
       // Only update server player list; keep local bots intact
       this.serverPlayers = roomState.players || [];
       this.roomId = roomState.roomId;
+      this.gameStarted = !!roomState.gameStarted;
+      const self = this.serverPlayers.find(p => p.id === this.playerId);
+      if (self?.name) this.playerName = self.name;
+      this._writeSession({ roomId: this.roomId, name: this.playerName, gameStarted: this.gameStarted });
       this._emit();
     });
 
@@ -221,11 +269,14 @@ class LobbyManagerImpl {
     this.bots = [];
     this.nextId = 1;
     this.roomId = null;
+    this.gameStarted = false;
+    this.playerName = '';
     this._emit();
   }
 
   createRoom(name) {
     const action = () => {
+      this.playerName = name;
       this.socket.emit('createRoom', { name });
       // Optimistic update: add self to list immediately
       if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
@@ -246,6 +297,9 @@ class LobbyManagerImpl {
 
   joinRoom(roomId, name) {
     const action = () => {
+      this.playerName = name;
+      this.roomId = roomId;
+      this._writeSession({ roomId, name, gameStarted: this.gameStarted });
       this.socket.emit('joinRoom', { roomId, name });
       // Optimistic update: add self to list immediately
       if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
@@ -285,6 +339,14 @@ class LobbyManagerImpl {
     const players = this.list();
     if (players.length < 2) return false; // 至少两名玩家才能开始
     return players.every(p => p.ready);
+  }
+
+  resumeSavedSession() {
+    const saved = this.getSavedSession();
+    if (!saved?.roomId || !saved?.name) return false;
+    if (this.roomId && this.serverPlayers.length) return false;
+    this.joinRoom(saved.roomId, saved.name);
+    return true;
   }
 }
 

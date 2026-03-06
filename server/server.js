@@ -151,9 +151,17 @@ io.on('connection', (socket) => {
 
   // Host sends the resolved state
   socket.on('roundResolved', (roomId, state) => {
+    const room = rooms[roomId];
+    if (!room) return;
     // console.log(`[roundResolved] room=${roomId} by host=${socket.id} round=${state?.round}`);
     // Broadcast to others
     io.to(roomId).emit('roundResolved', state || {});
+
+    const nextState = state?.state || state?.gameState;
+    if (nextState === 'ended') {
+      room.game = null;
+      io.to(roomId).emit('roomState', getRoomState(roomId));
+    }
 
     // Update server-side state cache if needed (omitted for now as we rely on host)
   });

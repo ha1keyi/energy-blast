@@ -476,8 +476,8 @@ export class GameScene extends Phaser.Scene {
             me.selectAction(pending.actionKey, target);
             // 同步给可能存在的服务器（占位）
             if (LobbyManager?.socket && LobbyManager?.roomId) {
-                const targetName = target?.name || targetPlayer?.name;
-                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetName);
+                const targetNetworkId = target?.networkId ?? target?.id ?? targetPlayer?.id;
+                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetNetworkId);
             }
             if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
                 window.debugUI.updatePlayerList();

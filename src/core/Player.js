@@ -5,6 +5,7 @@ import { ActionType } from './enums/ActionType.js';
 export class Player {
     constructor(id, name = `Player ${id}`, health = 1, energy = 0) {
         this.id = id;
+        this.networkId = null;
         this.name = name;
         this.health = health;
         this.maxHealth = health;
@@ -121,6 +122,7 @@ export class Player {
     getStatus() {
         return {
             id: this.id,
+            networkId: this.networkId,
             name: this.name,
             health: this.health,
             energy: this.energy,

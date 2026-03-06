@@ -41,6 +41,7 @@ export class Game {
         }
         const newId = this.players.length > 0 ? Math.max(...this.players.map(p => p.id)) + 1 : 1;
         const player = new Player(newId, name);
+        if (options && options.networkId != null) player.networkId = options.networkId;
         // 预留：虚拟玩家/AI 控制
         if (options && typeof options.isBot === 'boolean') player.isBot = !!options.isBot;
         if (options && options.controller) {
@@ -205,7 +206,9 @@ export class Game {
                     energyCost: p.currentAction.energyCost,
                     energyGain: p.currentAction.energyGain,
                 } : null,
+                networkId: p.networkId,
                 targetId: p.target ? p.target.id : null,
+                targetNetworkId: p.target ? p.target.networkId : null,
                 targetName: p.target ? p.target.name : null,
             })),
         };

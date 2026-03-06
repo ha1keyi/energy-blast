@@ -19,12 +19,23 @@
         <div id="home-screen">
           <h1>Energy Blast</h1>
           <p id="connection-status" style="margin:8px 0; color:#888; font-size:14px;">连接中...</p>
-          <button id="start-game-btn" class="interactive">进入房间</button>
+          <div class="home-actions">
+            <button id="start-game-btn" class="interactive">创建房间</button>
+            <button id="join-room-toggle-btn" class="interactive">加入房间</button>
+          </div>
+          <div id="join-room-form" class="hidden join-room-form">
+            <input id="join-room-input" type="text" placeholder="输入房间 ID" maxlength="24" />
+            <button id="join-room-confirm-btn" class="interactive">确认加入</button>
+          </div>
         </div>
 
         <!-- 房间 -->
         <div id="lobby-screen" class="hidden">
           <h2>游戏房间</h2>
+          <div id="room-meta" class="room-meta hidden">
+            <div id="room-id-display"></div>
+            <div id="room-link-display"></div>
+          </div>
           <div class="player-list-container">
             <ul id="player-list"></ul>
           </div>

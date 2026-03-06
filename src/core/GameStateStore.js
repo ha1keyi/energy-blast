@@ -79,17 +79,23 @@ export class GameStateStore {
     // Players by name preferred (fallback to id)
     const localByName = new Map(core.players.map(p => [p.name, p]));
     const localById = new Map(core.players.map(p => [p.id, p]));
+    const localByNetworkId = new Map(core.players.filter(p => p.networkId != null).map(p => [p.networkId, p]));
     if (Array.isArray(snap.players)) {
       const pendingTargets = [];
       snap.players.forEach(sp => {
         let lp = null;
         if (sp && typeof sp === 'object') {
-          if (sp.name && localByName.has(sp.name)) lp = localByName.get(sp.name);
+          if (sp.networkId != null && localByNetworkId.has(sp.networkId)) lp = localByNetworkId.get(sp.networkId);
+          else if (sp.name && localByName.has(sp.name)) lp = localByName.get(sp.name);
           else if (sp.id != null && localById.has(sp.id)) lp = localById.get(sp.id);
           if (!lp && sp.name) {
-            try { core.addPlayer(sp.name); lp = core.players.find(p => p.name === sp.name); } catch (_) { }
+            try {
+              core.addPlayer(sp.name, { networkId: sp.networkId, isBot: !!sp.isBot });
+              lp = core.players.find(p => p.name === sp.name);
+            } catch (_) { }
           }
           if (lp) {
+            if (sp.networkId != null) lp.networkId = sp.networkId;
             if (typeof sp.health === 'number') lp.health = sp.health;
             if (typeof sp.energy === 'number') lp.energy = sp.energy;
             if (typeof sp.isAlive === 'boolean') lp.isAlive = sp.isAlive;
@@ -105,15 +111,17 @@ export class GameStateStore {
             pendingTargets.push({
               player: lp,
               targetId: sp.targetId,
+              targetNetworkId: sp.targetNetworkId,
               targetName: sp.targetName,
             });
           }
         }
       });
 
-      pendingTargets.forEach(({ player, targetId, targetName }) => {
+      pendingTargets.forEach(({ player, targetId, targetNetworkId, targetName }) => {
         let target = null;
         if (targetId != null) target = core.players.find(p => p.id === targetId) || null;
+        if (!target && targetNetworkId != null) target = core.players.find(p => p.networkId === targetNetworkId) || null;
         if (!target && targetName) target = core.players.find(p => p.name === targetName) || null;
         player.target = target;
       });

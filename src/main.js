@@ -19,6 +19,7 @@ LobbyManager.connect();
 // 附加网络同步监听
 (function setupNetworkSync() {
   let lastBroadcast = { round: 0, state: '', logs: 0 };
+  let lastBroadcastAt = 0;
 
   // 当 socket 可用时绑定一次
   const tryBind = () => {
@@ -60,12 +61,11 @@ LobbyManager.connect();
     sock.on('actionSelected', ({ playerId, actionKey, targetId }) => {
       if (LobbyManager.isHost() && window.game) {
         const core = window.game;
-        const player = core.players.find(p => p.id === playerId);
+        const player = findCorePlayerByRemoteId(core, playerId);
         if (player) {
           let target = null;
           if (targetId) {
-            // Try finding by ID first, then name
-            target = core.players.find(p => p.id === targetId || p.name === targetId);
+            target = findCorePlayerByRemoteId(core, targetId);
           }
           try {
             player.selectAction(actionKey, target);
@@ -80,6 +80,16 @@ LobbyManager.connect();
       }
     });
 
+    sock.off && sock.off('gameEnded');
+    sock.on('gameEnded', (reason) => {
+      if (typeof window.showToast === 'function' && reason) {
+        window.showToast(`对局结束：${reason}`);
+      }
+      if (typeof window.returnToLobby === 'function') {
+        window.returnToLobby();
+      }
+    });
+
     // 所有客户端：收到服务端开局事件后进入游戏
     sock.off && sock.off('gameStarted');
     sock.on('gameStarted', () => {
@@ -91,6 +101,7 @@ LobbyManager.connect();
     // 收到再来一局通知
     sock.off && sock.off('rematchStarted');
     sock.on('rematchStarted', () => {
+      clearEndReturnTimer();
       if (window.game) {
         window.game.isRunning = false;
         window.game.gameState = 'idle';
@@ -111,7 +122,8 @@ LobbyManager.connect();
     const core = window.game;
     if (!core || !LobbyManager.connected || !LobbyManager.roomId || !LobbyManager.isHost()) return;
     const snap = { round: core.currentRound, state: core.gameState, logs: core.logs?.length || 0 };
-    if (snap.round !== lastBroadcast.round || snap.state !== lastBroadcast.state || snap.logs !== lastBroadcast.logs) {
+    const shouldHeartbeat = (Date.now() - lastBroadcastAt) > 1200;
+    if (snap.round !== lastBroadcast.round || snap.state !== lastBroadcast.state || snap.logs !== lastBroadcast.logs || shouldHeartbeat) {
       // broadcast minimal snapshot to others
       LobbyManager.socket.emit('roundResolved', LobbyManager.roomId, core.getGameState ? core.getGameState() : {
         round: core.currentRound,
@@ -120,6 +132,7 @@ LobbyManager.connect();
         players: core.players.map(p => ({ id: p.id, name: p.name, health: p.health, energy: p.energy, isAlive: p.isAlive }))
       });
       lastBroadcast = snap;
+      lastBroadcastAt = Date.now();
     }
   };
   setInterval(broadcastTick, 400);
@@ -159,11 +172,18 @@ console.log('Energy Blast initialized (hybrid UI + Phaser canvas)!');
 const homeScreen = document.getElementById('home-screen');
 const lobbyScreen = document.getElementById('lobby-screen');
 const startBtn = document.getElementById('start-game-btn');
+const joinToggleBtn = document.getElementById('join-room-toggle-btn');
+const joinRoomFormEl = document.getElementById('join-room-form');
+const joinRoomInput = document.getElementById('join-room-input');
+const joinRoomConfirmBtn = document.getElementById('join-room-confirm-btn');
 const readyBtn = document.getElementById('ready-btn');
 const shareBtn = document.getElementById('share-link-btn');
 const connStatus = document.getElementById('connection-status');
 const playerListEl = document.getElementById('player-list');
 const lobbyStatusEl = document.getElementById('lobby-status');
+const roomMetaEl = document.getElementById('room-meta');
+const roomIdDisplayEl = document.getElementById('room-id-display');
+const roomLinkDisplayEl = document.getElementById('room-link-display');
 const actionBarEl = document.getElementById('action-bar');
 const gameCanvasEl = document.getElementById('game-canvas');
 
@@ -245,10 +265,80 @@ function openNameModal(defaultName = `玩家${Math.floor(Math.random() * 100)}`,
 let localPlayerId = 1; // assume host is player 1 in this demo
 let gameSyncIntervalId = null;
 let endHandled = false;
+let endReturnTimerId = null;
+
+function clearEndReturnTimer() {
+  if (endReturnTimerId) {
+    clearTimeout(endReturnTimerId);
+    endReturnTimerId = null;
+  }
+}
+
+function scheduleReturnToRoom() {
+  if (endReturnTimerId) return;
+  endReturnTimerId = setTimeout(() => {
+    endReturnTimerId = null;
+    if (gameCore.gameState === 'ended' && typeof window.returnToLobby === 'function') {
+      window.returnToLobby();
+    }
+  }, 2200);
+}
+
+function findCorePlayerByRemoteId(core, remoteId) {
+  if (!core || remoteId == null) return null;
+  return core.players.find(p => p.networkId === remoteId || String(p.id) === String(remoteId) || p.name === String(remoteId)) || null;
+}
+
+function getSelectedActionLabel(player) {
+  if (!player) return '未选择';
+  if (window.pendingAttack && window.pendingAttack.selfId === player.id) {
+    const pendingCfg = ACTIONS[window.pendingAttack.actionKey];
+    return pendingCfg ? `${pendingCfg.name} (待选目标)` : '攻击 (待选目标)';
+  }
+  if (!player.currentAction) return '未选择';
+  const targetSuffix = player.target?.name ? ` -> ${player.target.name}` : '';
+  return `${player.currentAction.name}${targetSuffix}`;
+}
+
+function buildShareUrl(roomId) {
+  if (!roomId) return '';
+  let origin = location.origin;
+  const isNgrok = location.hostname.endsWith('ngrok-free.dev') || location.hostname.endsWith('ngrok.io');
+
+  if (!isNgrok && LobbyManager.socket && LobbyManager.connected) {
+    try {
+      const socketUrl = new URL(LobbyManager.socket.io.uri);
+      if (socketUrl.hostname !== 'localhost' && socketUrl.hostname !== '127.0.0.1') {
+        origin = `${location.protocol}//${socketUrl.hostname}:${location.port}`;
+      }
+    } catch (e) {
+      console.error('Could not parse socket URL for sharing:', e);
+    }
+  }
+
+  return `${origin}?room=${roomId}`;
+}
+
+function ensureHostRoundTimer() {
+  if (!gameCore?.isRunning || gameCore.gameState !== 'selecting') return;
+  const isHost = LobbyManager.isHost && LobbyManager.isHost();
+  if (!isHost) {
+    gameCore.clearTimer?.();
+    gameCore.nextResolveAt = null;
+    return;
+  }
+  if (gameCore.timer || !debugUI?.isAutoResolve) return;
+  gameCore.nextResolveAt = Date.now() + (gameCore.roundTime || 5000);
+  gameCore.timer = setTimeout(async () => {
+    await gameCore.processRound();
+  }, gameCore.roundTime || 5000);
+}
 
 function returnToLobby({ resetRoom = false } = {}) {
   window.pendingAttack = null;
   endHandled = false;
+  clearEndReturnTimer();
+  LobbyManager.gameStarted = false;
 
   if (gameSyncIntervalId) {
     clearInterval(gameSyncIntervalId);
@@ -263,10 +353,12 @@ function returnToLobby({ resetRoom = false } = {}) {
   gameCore.isRunning = false;
   gameCore.gameState = 'idle';
   gameCore.nextResolveAt = null;
+  hideActionBar();
   if (gameCanvasEl) gameCanvasEl.classList.add('hidden');
 
   if (resetRoom) {
     LobbyManager.roomId = null;
+    LobbyManager.clearSession?.();
     LobbyManager.reset();
   }
 
@@ -319,7 +411,7 @@ function showActionBar() {
       header.textContent = `回合 ${gameCore.currentRound} · 状态：选择阶段 · 倒计时：${sec}s`;
     }
     if (statusEl) {
-      statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy}`;
+      statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy} · Selected: ${getSelectedActionLabel(me)}`;
     }
     return;
   }
@@ -342,7 +434,7 @@ function showActionBar() {
   const statusEl = document.createElement('div');
   statusEl.id = 'action-bar-status';
   statusEl.className = 'action-bar-status';
-  statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy}`;
+  statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy} · Selected: ${getSelectedActionLabel(me)}`;
   actionBarEl.appendChild(statusEl);
 
   // 操作按钮行，横向排列并居中
@@ -415,6 +507,7 @@ function onChooseAction(player, actionKey) {
   const cfg = ACTIONS[actionKey];
   if (cfg.type === ActionType.ATTACK) {
     window.pendingAttack = { selfId: player.id, actionKey };
+    showActionBar();
   } else {
     // 将行动选择同步到本地核心（保证倒计时栏能显示“已选”）并广播到服务器
     try {
@@ -433,6 +526,10 @@ function renderLobby() {
     li.innerHTML = `<span>${p.name}${p.isBot ? ' (虚拟)' : ''}</span><span class="player-status ${p.ready ? 'ready' : ''}">${p.ready ? '已准备' : '未准备'}</span>`;
     playerListEl.appendChild(li);
   });
+  const shareUrl = buildShareUrl(LobbyManager.roomId);
+  roomMetaEl?.classList.toggle('hidden', !LobbyManager.roomId);
+  if (roomIdDisplayEl) roomIdDisplayEl.textContent = LobbyManager.roomId ? `房间 ID：${LobbyManager.roomId}` : '';
+  if (roomLinkDisplayEl) roomLinkDisplayEl.textContent = shareUrl ? `邀请链接：${shareUrl}` : '';
   // 按钮状态：仅在已连接且在房间内时可用
   shareBtn?.toggleAttribute('disabled', !(LobbyManager.roomId && LobbyManager.connected));
   readyBtn?.toggleAttribute('disabled', !(LobbyManager.roomId && LobbyManager.connected));
@@ -478,6 +575,16 @@ function renderLobby() {
   } else {
     lobbyStatusEl.textContent = LobbyManager.connected ? '等待所有玩家准备...' : '未连接，无法开始';
   }
+
+  if (LobbyManager.gameStarted && LobbyManager.roomId && !gameCore.isRunning) {
+    setTimeout(() => {
+      if (LobbyManager.gameStarted && !gameCore.isRunning) {
+        startGame({ force: true });
+      }
+    }, 0);
+  }
+
+  ensureHostRoundTimer();
 }
 
 // 连接状态文案与“离线房间”入口
@@ -531,6 +638,29 @@ startBtn?.addEventListener('click', async () => {
   }
 });
 
+joinToggleBtn?.addEventListener('click', () => {
+  joinRoomFormEl?.classList.toggle('hidden');
+  if (joinRoomFormEl && !joinRoomFormEl.classList.contains('hidden')) {
+    setTimeout(() => joinRoomInput?.focus(), 0);
+  }
+});
+
+const submitJoinRoom = () => {
+  const nextRoomId = (joinRoomInput?.value || '').trim();
+  if (!nextRoomId) return showToast('请输入房间 ID');
+  openNameModal(`玩家${Math.floor(Math.random() * 100)}`, (playerName) => {
+    LobbyManager.joinRoom(nextRoomId, playerName);
+    homeScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('hidden');
+    joinRoomFormEl?.classList.add('hidden');
+  }, () => { });
+};
+
+joinRoomConfirmBtn?.addEventListener('click', submitJoinRoom);
+joinRoomInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitJoinRoom();
+});
+
 readyBtn?.addEventListener('click', () => {
   LobbyManager.toggleReady();
   const self = LobbyManager.getSelf();
@@ -544,24 +674,7 @@ shareBtn?.addEventListener('click', () => {
   if (!(LobbyManager.roomId && LobbyManager.connected)) {
     return showToast('未连接服务器，无法分享房间');
   }
-  let origin = location.origin;
-  // If we're on ngrok, just use the current origin.
-  // Otherwise, fallback to the socket hostname logic for local network.
-  const isNgrok = location.hostname.endsWith('ngrok-free.dev') || location.hostname.endsWith('ngrok.io');
-
-  if (!isNgrok && LobbyManager.socket && LobbyManager.connected) {
-    try {
-      const socketUrl = new URL(LobbyManager.socket.io.uri);
-      // Use the socket's hostname if it's a proper network IP
-      if (socketUrl.hostname !== 'localhost' && socketUrl.hostname !== '127.0.0.1') {
-        // Reconstruct origin with the socket's hostname and the frontend's port
-        origin = `${location.protocol}//${socketUrl.hostname}:${location.port}`;
-      }
-    } catch (e) {
-      console.error("Could not parse socket URL for sharing:", e);
-    }
-  }
-  const url = `${origin}?room=${LobbyManager.roomId}`;
+  const url = buildShareUrl(LobbyManager.roomId);
 
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(url)
@@ -576,6 +689,7 @@ shareBtn?.addEventListener('click', () => {
 function startGame({ force = false } = {}) {
   if (!force && !LobbyManager.allReady()) return;
   if (gameCore.isRunning && phaserGame.scene.isActive('GameScene')) return;
+  clearEndReturnTimer();
 
   // Hide DOM UI; game runs on canvas
   document.getElementById('ui-container')?.classList.add('hidden');
@@ -586,7 +700,7 @@ function startGame({ force = false } = {}) {
   const lobbyPlayers = LobbyManager.list();
   const selfLobby = (LobbyManager.getSelf && LobbyManager.getSelf()) || null;
   lobbyPlayers.forEach((p, idx) => {
-    gameCore.addPlayer(p.name, { isBot: !!p.isBot });
+    gameCore.addPlayer(p.name, { isBot: !!p.isBot, networkId: p.id });
     const added = gameCore.players[idx];
     if (selfLobby && p.id === selfLobby.id && added) {
       localPlayerId = added.id;
@@ -613,6 +727,7 @@ function startGame({ force = false } = {}) {
     }
 
     if (gameCore.gameState === 'selecting') {
+      ensureHostRoundTimer();
       showActionBar();
     } else {
       hideActionBar();
@@ -620,7 +735,10 @@ function startGame({ force = false } = {}) {
     // Game over -> return to lobby UI
     if (gameCore.gameState === 'ended') {
       window.pendingAttack = null;
-      endHandled = true;
+      if (!endHandled) {
+        endHandled = true;
+        scheduleReturnToRoom();
+      }
     }
   };
   // Observe game state via polling simple interval (Dev)
@@ -647,4 +765,11 @@ if (roomId) {
   }, () => {
     // 取消加入，保持在首页
   });
+} else {
+  const resumed = LobbyManager.resumeSavedSession?.();
+  if (resumed) {
+    homeScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('hidden');
+    showToast('已恢复上次房间，正在同步状态...');
+  }
 }

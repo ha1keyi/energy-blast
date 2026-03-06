@@ -54,9 +54,9 @@ export class GameClient {
     });
   }
 
-  selectAction(actionKey, targetName) {
+  selectAction(actionKey, targetId) {
     if (!this.socket || typeof this.socket.emit !== 'function') return;
-    this.socket.emit('selectAction', this.roomId, actionKey, targetName);
+    this.socket.emit('selectAction', this.roomId, actionKey, targetId);
   }
 
   getGameState() {

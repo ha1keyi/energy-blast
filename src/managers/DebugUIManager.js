@@ -121,6 +121,7 @@ export class DebugUIManager {
     if (!editor) return;
 
     editor.addEventListener('change', (ev) => {
+      if (!(!!LobbyManager.roomId && LobbyManager.isHost())) return;
       const target = ev.target;
       const row = target?.closest?.('[data-player-id]');
       if (!row) return;
@@ -274,7 +275,7 @@ export class DebugUIManager {
   }
 
   updatePlayerList() {
-    // no-op placeholder to avoid errors from callers
+    this.renderPlayerEditor(true);
   }
 
   updateGameState() {
