@@ -11,6 +11,7 @@ export class Game {
     constructor(players = [], roundTime = ROUND_TIME) {
         this.players = players;
         this.roundTime = roundTime;
+        this.autoResolveEnabled = true;
         this.currentRound = 0;
         this.isRunning = false;
         this.timer = null;
@@ -24,6 +25,35 @@ export class Game {
         // 注意：保持 this.logs 作为单一真值来源，store.logs 引用它
         this.store = new GameStateStore(this);
         this.combatManager = new CombatManager(this);
+    }
+
+    getMatchSettings() {
+        return {
+            autoResolve: !!this.autoResolveEnabled,
+            roundTimeMs: this.roundTime,
+        };
+    }
+
+    applyMatchSettings(settings = {}, { reschedule = true } = {}) {
+        if (typeof settings.autoResolve === 'boolean') {
+            this.autoResolveEnabled = settings.autoResolve;
+        }
+
+        if (typeof settings.roundTimeMs === 'number' && Number.isFinite(settings.roundTimeMs)) {
+            this.roundTime = Math.max(2000, Math.min(30000, Math.round(settings.roundTimeMs)));
+        }
+
+        if (reschedule && this.isRunning && this.gameState === 'selecting') {
+            if (this.autoResolveEnabled) {
+                this.scheduleResolveTimer({ force: true });
+            } else {
+                this.clearResolveTimer();
+            }
+        }
+
+        if (this.debugUIManager?.syncControlStateFromGame) {
+            this.debugUIManager.syncControlStateFromGame();
+        }
     }
 
     setDebugUIManager(manager) {
@@ -94,16 +124,7 @@ export class Game {
         }
 
         // 仅房主自动推进；非房主由网络同步
-        this.clearTimer();
-        const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
-        if (isHost && this.debugUIManager?.isAutoResolve) {
-            this.nextResolveAt = Date.now() + this.roundTime;
-            this.timer = setTimeout(async () => {
-                await this.processRound();
-            }, this.roundTime);
-        } else {
-            this.nextResolveAt = null;
-        }
+        this.scheduleResolveTimer({ force: true });
     }
 
     startRound() {
@@ -119,15 +140,7 @@ export class Game {
         this.addLog(`第 ${this.currentRound} 回合开始`);
 
         // 仅在房主且自动结算开启时才定时推进
-        const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
-        if (isHost && this.debugUIManager?.isAutoResolve) {
-            this.nextResolveAt = Date.now() + this.roundTime;
-            this.timer = setTimeout(async () => {
-                await this.processRound();
-            }, this.roundTime);
-        } else {
-            this.nextResolveAt = null;
-        }
+        this.scheduleResolveTimer({ force: true });
 
         if (this.debugUIManager) {
             this.debugUIManager.updateGameState();
@@ -158,6 +171,32 @@ export class Game {
             clearTimeout(this.timer);
             this.timer = null;
         }
+    }
+
+    clearResolveTimer(resetDeadline = true) {
+        this.clearTimer();
+        if (resetDeadline) {
+            this.nextResolveAt = null;
+        }
+    }
+
+    scheduleResolveTimer({ force = false } = {}) {
+        const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
+        if (!(isHost && this.autoResolveEnabled && this.isRunning && this.gameState === 'selecting')) {
+            this.nextResolveAt = null;
+            return;
+        }
+
+        const now = Date.now();
+        if (!force && this.timer && typeof this.nextResolveAt === 'number' && this.nextResolveAt > now + 120) {
+            return;
+        }
+
+        this.clearResolveTimer(false);
+        this.nextResolveAt = now + this.roundTime;
+        this.timer = setTimeout(async () => {
+            await this.processRound();
+        }, this.roundTime);
     }
 
     // 新增：同步当前帧状态到 Store/UI（用于刚进入选择阶段时刷新 HUD 等）
@@ -195,6 +234,7 @@ export class Game {
             round: this.currentRound,
             isRunning: this.isRunning,
             nextResolveAt: this.nextResolveAt,
+            matchSettings: this.getMatchSettings(),
             gameState: this.gameState,
             state: this.gameState,
             logs: this.logs,

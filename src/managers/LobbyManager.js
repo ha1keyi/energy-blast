@@ -3,6 +3,25 @@
 
 import { io } from 'socket.io-client';
 
+const DEFAULT_ROOM_SETTINGS = Object.freeze({
+  autoResolve: true,
+  roundTimeMs: 5000,
+});
+
+function normalizeRoomSettings(input = {}) {
+  const autoResolve = typeof input.autoResolve === 'boolean'
+    ? input.autoResolve
+    : DEFAULT_ROOM_SETTINGS.autoResolve;
+  const rawRoundTime = typeof input.roundTimeMs === 'number' && Number.isFinite(input.roundTimeMs)
+    ? input.roundTimeMs
+    : DEFAULT_ROOM_SETTINGS.roundTimeMs;
+
+  return {
+    autoResolve,
+    roundTimeMs: Math.max(2000, Math.min(30000, Math.round(rawRoundTime))),
+  };
+}
+
 class LobbyManagerImpl {
   constructor() {
     // Separate server-synced players and local bots
@@ -18,6 +37,7 @@ class LobbyManagerImpl {
     this.connected = false;
     this.gameStarted = false;
     this.lastSnapshot = null;
+    this.roomSettings = { ...DEFAULT_ROOM_SETTINGS };
     this._pendingAction = null; // Action to run upon connection
     this._sessionKey = 'energy-blast-room-session';
   }
@@ -169,6 +189,7 @@ class LobbyManagerImpl {
       this.roomId = roomState.roomId;
       this.gameStarted = !!roomState.gameStarted;
       this.lastSnapshot = roomState.snapshot || null;
+      this.roomSettings = normalizeRoomSettings(roomState.settings);
       const self = this.serverPlayers.find(p => p.id === this.playerId);
       if (self?.name) this.playerName = self.name;
       this._writeSession({ roomId: this.roomId, name: this.playerName, gameStarted: this.gameStarted });
@@ -286,7 +307,39 @@ class LobbyManagerImpl {
     this.roomId = null;
     this.gameStarted = false;
     this.lastSnapshot = null;
+    this.roomSettings = { ...DEFAULT_ROOM_SETTINGS };
     this._emit();
+  }
+
+  getRoomSettings() {
+    return normalizeRoomSettings(this.roomSettings);
+  }
+
+  updateRoomSettings(partial = {}) {
+    const next = normalizeRoomSettings({ ...this.roomSettings, ...partial });
+    this.roomSettings = next;
+
+    if (!this.connected || !this.socket || !this.roomId || String(this.roomId).startsWith('local-')) {
+      this._emit();
+      return next;
+    }
+
+    if (this.isHost()) {
+      this.socket.emit('updateRoomSettings', this.roomId, next);
+    }
+    this._emit();
+    return next;
+  }
+
+  startGame(settings = this.getRoomSettings()) {
+    if (!this.roomId) return false;
+    this.roomSettings = normalizeRoomSettings(settings);
+    if (String(this.roomId).startsWith('local-') || !this.socket || !this.connected) {
+      this._emit();
+      return false;
+    }
+    this.socket.emit('startGame', this.roomId, this.roomSettings);
+    return true;
   }
 
   createRoom(name) {

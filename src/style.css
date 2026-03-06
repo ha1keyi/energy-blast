@@ -196,6 +196,52 @@ button:active {
   word-break: break-all;
 }
 
+.match-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.match-settings-row:first-child {
+  margin-top: 0;
+}
+
+.match-settings-row label {
+  font-size: 14px;
+  color: #111;
+}
+
+.match-settings-row select,
+.match-settings-row input {
+  min-width: 96px;
+  padding: 6px 8px;
+  border: 2px solid #222;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: #222;
+}
+
+.match-settings-row input[disabled],
+.match-settings-row select[disabled] {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+.match-settings-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-settings-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #555;
+}
+
 .player-list-container {
   min-height: 150px;
   border: 2px dashed #999;

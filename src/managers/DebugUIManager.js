@@ -6,11 +6,18 @@ import { ACTIONS } from '../core/constants/Actions.js';
 export class DebugUIManager {
   constructor(game) {
     this.game = game;
-    this.isAutoResolve = true; // keep auto resolve default
+    this.isAutoResolve = game?.autoResolveEnabled ?? true;
     this.visible = false;
     this.isCollapsed = false;
     this._editorBound = false;
     this._editorSignature = '';
+  }
+
+  isNetworkMatchActive() {
+    if (!LobbyManager.roomId || !LobbyManager.connected) return false;
+    if (String(LobbyManager.roomId).startsWith('local-')) return false;
+    const realPlayers = (LobbyManager.list?.() || []).filter(player => !player.isBot);
+    return realPlayers.length >= 2;
   }
 
   startUpdating() {
@@ -60,22 +67,20 @@ export class DebugUIManager {
   }
 
   setAutoResolve(val) {
+    if (this.isNetworkMatchActive()) {
+      this.syncControlStateFromGame();
+      return;
+    }
     this.isAutoResolve = !!val;
-    // 同步复选框状态
+    this.game?.applyMatchSettings?.({ autoResolve: this.isAutoResolve }, { reschedule: true });
+    this.syncControlStateFromGame();
+  }
+
+  syncControlStateFromGame() {
+    this.isAutoResolve = this.game?.autoResolveEnabled ?? this.isAutoResolve;
     const checkbox = document.getElementById('debug-auto-checkbox');
     if (checkbox) checkbox.checked = this.isAutoResolve;
-
-    // 根据自动推进状态刷新下一次结算时间
-    if (this.game) {
-      const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
-      this.game.clearTimer?.();
-      if (isHost && this.isAutoResolve && this.game.isRunning && this.game.gameState === 'selecting') {
-        this.game.nextResolveAt = Date.now() + (this.game.roundTime || 5000);
-        this.game.timer = setTimeout(async () => { await this.game.processRound(); }, (this.game.roundTime || 5000));
-      } else {
-        this.game.nextResolveAt = null;
-      }
-    }
+    this.syncTimerControls();
   }
 
   attachControls() {
@@ -104,7 +109,27 @@ export class DebugUIManager {
 
     this.bindPlayerEditorEvents();
     this.applyCollapsedState();
+    this.syncTimerControls();
     this.renderPlayerEditor(true);
+  }
+
+  syncTimerControls() {
+    const checkbox = document.getElementById('debug-auto-checkbox');
+    const resolveBtn = document.getElementById('debug-resolve-btn');
+    const locked = this.isNetworkMatchActive();
+    const isSelecting = !!(this.game?.isRunning && this.game?.gameState === 'selecting');
+    const autoResolveEnabled = this.game?.autoResolveEnabled ?? this.isAutoResolve;
+    if (checkbox) {
+      checkbox.checked = autoResolveEnabled;
+      checkbox.disabled = locked;
+      checkbox.title = locked ? '联机对战请在开局前于房间设置中修改' : '';
+    }
+    if (resolveBtn) {
+      resolveBtn.disabled = !isSelecting || (locked && autoResolveEnabled);
+      resolveBtn.title = locked && autoResolveEnabled
+        ? '当前为自动结算模式，需在开局前改为手动结算'
+        : '';
+    }
   }
 
   applyCollapsedState() {
@@ -201,6 +226,7 @@ export class DebugUIManager {
   renderPlayerEditor(force = false) {
     const editor = document.getElementById('debug-player-editor');
     if (!editor || !this.visible || this.isCollapsed) return;
+    this.syncTimerControls();
 
     const players = this.game?.players || [];
     const signature = JSON.stringify(players.map(p => ({

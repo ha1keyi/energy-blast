@@ -12,8 +12,6 @@ export class BattleAnimationManager {
     this.timers = [];
     this._active = true;
     this._signature = '';
-
-    this.timer = this.scene.time.addEvent({ delay: 220, loop: true, callback: () => this.refresh() });
     this.scene.events.on('shutdown', this.cleanup, this);
     this.scene.events.on('destroy', this.cleanup, this);
   }
@@ -21,10 +19,6 @@ export class BattleAnimationManager {
   cleanup() {
     if (!this._active) return;
     this._active = false;
-    if (this.timer) {
-      this.timer.remove(false);
-      this.timer = null;
-    }
     this.timers.forEach(timer => timer?.remove?.(false));
     this.timers = [];
     this.clearSprites();
@@ -236,5 +230,3 @@ export class BattleAnimationManager {
     return results;
   }
 }
-
-export class RoundResolutionManager extends BattleAnimationManager { }

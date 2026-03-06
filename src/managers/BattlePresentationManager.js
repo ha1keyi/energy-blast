@@ -2,27 +2,140 @@ import { BattleAnimationManager } from './RoundResolutionManager.js';
 import { BattleLayoutManager } from './BattleLayoutManager.js';
 
 export class BattlePresentationManager {
-    constructor(core, scene, layoutManager = null) {
+    constructor(core, scene, options = {}) {
         this.core = core;
         this.scene = scene;
-        this.layoutManager = layoutManager || new BattleLayoutManager(scene);
+        this.layoutManager = options.layoutManager || new BattleLayoutManager(scene);
+        this.onChooseTarget = options.onChooseTarget || (() => { });
+        this.onRematch = options.onRematch || (() => { });
+        this.onReturnLobby = options.onReturnLobby || (() => { });
         this.animationManager = new BattleAnimationManager(core, scene);
         this.logContainer = this.scene.add.container(0, 0).setDepth(25);
+        this.hudContainer = this.scene.add.container(0, 0).setDepth(15);
+        this.pendingHint = this.scene.add.text(0, 0, '请选择攻击目标…', {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000', backgroundColor: '#fff'
+        }).setOrigin(0.5).setDepth(20).setVisible(false);
+        this.endScreenContainer = this.scene.add.container(0, 0).setDepth(100).setVisible(false);
+        this.endAutoReturnTimer = null;
         this._disposed = false;
         this._logSignature = '';
+        this._hudSignature = '';
+        this._endSignature = '';
     }
 
     refresh() {
         if (this._disposed) return;
-        this.animationManager.refresh();
+        this.refreshHUD();
+        this.refreshPendingHint();
         this.refreshBattleLogPanel();
+        this.animationManager.refresh();
+        this.refreshEndScreen();
     }
 
     reset() {
         if (this._disposed) return;
         this.animationManager.reset();
         this._logSignature = '';
+        this._hudSignature = '';
+        this._endSignature = '';
+        this.clearHud();
         this.logContainer.removeAll(true);
+        this.pendingHint.setVisible(false);
+        this.hideEndScreen();
+    }
+
+    refreshPendingHint() {
+        const position = this.layoutManager.getPendingHintPosition();
+        this.pendingHint.setPosition(position.x, position.y);
+        this.pendingHint.setVisible(!!window.pendingAttack && this.core?.gameState === 'selecting');
+    }
+
+    refreshHUD() {
+        if (!this.core) return;
+        const players = this.core.players || [];
+        const localPlayerId = window.localPlayerId || players[0]?.id || null;
+        const self = players.find(player => player.id === localPlayerId) || null;
+        const others = players.filter(player => player.id !== localPlayerId);
+        const metrics = this.layoutManager.getMetrics();
+
+        const signature = JSON.stringify({
+            round: this.core.currentRound,
+            state: this.core.gameState,
+            players: players.map(player => ({
+                id: player.id,
+                networkId: player.networkId,
+                name: player.name,
+                health: player.health,
+                energy: player.energy,
+                alive: player.isAlive,
+            })),
+            size: { width: metrics.width, height: metrics.height },
+            localPlayerId,
+        });
+        if (signature === this._hudSignature) return;
+        this._hudSignature = signature;
+
+        this.clearHud();
+        if (!players.length) return;
+
+        const positions = this.layoutManager.getOpponentPositions(others.length);
+        others.forEach((player, index) => {
+            const position = positions[index];
+            if (!position) return;
+            const node = this.buildOpponentHud(player, position);
+            this.hudContainer.add(node);
+        });
+
+        if (self) {
+            const selfHud = this.buildSelfHud(self);
+            this.hudContainer.add(selfHud);
+        }
+
+        const roundStatePosition = this.layoutManager.getRoundStatusPosition();
+        const roundState = this.scene.add.text(roundStatePosition.x, roundStatePosition.y, this.getRoundStateText(), {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000', backgroundColor: '#fff'
+        }).setOrigin(0.5, 1).setDepth(15);
+        this.hudContainer.add(roundState);
+    }
+
+    buildOpponentHud(player, position) {
+        const container = this.scene.add.container(position.x, position.y).setDepth(10);
+        const width = 160;
+        const height = 60;
+        const baseX = position.align === 1 ? -width : (position.align === 0.5 ? -width / 2 : 0);
+
+        const shadow = this.scene.add.rectangle(baseX + 4, 4, width, height, 0x222222, 1).setOrigin(0, 0);
+        const bg = this.scene.add.rectangle(baseX, 0, width, height, 0xffffff, 1).setStrokeStyle(3, 0x000000).setOrigin(0, 0);
+        const name = this.scene.add.text(baseX + 12, 8, player.name, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000' }).setOrigin(0, 0);
+        const hpText = this.scene.add.text(baseX + 12, 32, `❤️ ${player.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: player.health <= 0 ? '#e74c3c' : '#000' }).setOrigin(0, 0);
+        const energyText = this.scene.add.text(baseX + 80, 32, `气 ${player.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000' }).setOrigin(0, 0);
+        const hit = this.scene.add.rectangle(baseX, 0, width, height, 0x000000, 0.001).setOrigin(0, 0).setInteractive({ cursor: 'pointer' });
+
+        hit.on('pointerover', () => bg.setFillStyle(0xfafafa, 1));
+        hit.on('pointerout', () => bg.setFillStyle(0xffffff, 1));
+        hit.on('pointerdown', () => this.onChooseTarget(player));
+
+        container.add([shadow, bg, name, hpText, energyText, hit]);
+        return container;
+    }
+
+    buildSelfHud(player) {
+        const position = this.layoutManager.getSelfHudPosition();
+        const compact = this.layoutManager.getMetrics().compact;
+        const width = compact ? 220 : 260;
+        const height = compact ? 68 : 80;
+        const container = this.scene.add.container(position.x, position.y).setDepth(15);
+        const shadow = this.scene.add.rectangle(4, 4, width, height, 0x222222, 1);
+        const bg = this.scene.add.rectangle(0, 0, width, height, 0xffffff, 1).setStrokeStyle(3, 0x000000);
+        const name = this.scene.add.text(0, -20, `${player.name} (你)`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: compact ? '16px' : '18px', color: '#000' }).setOrigin(0.5, 0.5);
+        const energy = this.scene.add.text(-50, 10, `气: ${player.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: compact ? '14px' : '16px', color: '#000' });
+        const health = this.scene.add.text(50, 10, `❤️: ${player.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: compact ? '14px' : '16px', color: player.health <= 0 ? '#ff0000' : '#000' });
+        container.add([shadow, bg, name, energy, health]);
+        return container;
+    }
+
+    clearHud() {
+        this.hudContainer.removeAll(true);
     }
 
     refreshBattleLogPanel() {
@@ -41,12 +154,7 @@ export class BattlePresentationManager {
             return round === '' ? message : `R${round}: ${message}`;
         });
 
-        const signature = JSON.stringify({
-            bounds,
-            compact,
-            state: this.core.gameState,
-            recent,
-        });
+        const signature = JSON.stringify({ bounds, compact, state: this.core.gameState, recent });
         if (signature === this._logSignature) return;
         this._logSignature = signature;
 
@@ -106,6 +214,109 @@ export class BattlePresentationManager {
         });
     }
 
+    refreshEndScreen() {
+        if (!this.core || this._disposed) return;
+
+        if (this.core.gameState !== 'ended') {
+            this.hideEndScreen();
+            return;
+        }
+
+        const alivePlayers = this.core.getAlivePlayers();
+        const winner = alivePlayers[0] || null;
+        const signature = JSON.stringify({
+            state: this.core.gameState,
+            winner: winner?.id || null,
+            title: alivePlayers.length === 1 ? '胜 负 已 分' : '同 归 于 尽',
+            size: this.layoutManager.getEndScreenBox(),
+        });
+        if (signature === this._endSignature && this.endScreenContainer.visible) return;
+        this._endSignature = signature;
+
+        const { width, height } = this.scene.scale;
+        const box = this.layoutManager.getEndScreenBox();
+        this.endScreenContainer.removeAll(true);
+        this.endScreenContainer.setVisible(true);
+
+        const overlay = this.scene.add.rectangle(0, 0, width, height, 0xffffff, 0.8).setOrigin(0, 0);
+        const graphics = this.scene.add.graphics();
+        graphics.lineStyle(4, 0x000000, 1);
+        graphics.fillStyle(0xffffff, 1);
+
+        const points = [
+            { x: box.x - box.width / 2, y: box.y - box.height / 2 },
+            { x: box.x + box.width / 2, y: box.y - box.height / 2 },
+            { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+            { x: box.x - box.width / 2, y: box.y + box.height / 2 }
+        ];
+
+        graphics.beginPath();
+        graphics.moveTo(points[0].x + (Math.random() - 0.5) * 5, points[0].y + (Math.random() - 0.5) * 5);
+        for (let i = 1; i <= points.length; i++) {
+            const point = points[i % points.length];
+            graphics.lineTo(point.x + (Math.random() - 0.5) * 5, point.y + (Math.random() - 0.5) * 5);
+        }
+        graphics.closePath();
+        graphics.fillPath();
+        graphics.strokePath();
+
+        const titleText = alivePlayers.length === 1 ? '胜 负 已 分' : '同 归 于 尽';
+        const title = this.scene.add.text(box.x, box.y - 100, titleText, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '40px', color: '#000'
+        }).setOrigin(0.5);
+
+        const resultText = winner ? `获胜者: ${winner.name}` : '没有活下来的玩家';
+        const result = this.scene.add.text(box.x, box.y - 20, resultText, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '24px', color: '#000'
+        }).setOrigin(0.5);
+
+        const rematchBtn = this.createHandDrawnButton(box.x - 90, box.y + 80, 160, 50, '再来一局', () => this.onRematch());
+        const exitBtn = this.createHandDrawnButton(box.x + 90, box.y + 80, 160, 50, '返回大厅', () => this.onReturnLobby());
+
+        this.endScreenContainer.add([overlay, graphics, title, result, ...rematchBtn, ...exitBtn]);
+        this.endScreenContainer.setAlpha(0);
+        this.scene.tweens.add({ targets: this.endScreenContainer, alpha: 1, duration: 500, ease: 'Power2' });
+
+        if (this.endAutoReturnTimer) this.endAutoReturnTimer.remove(false);
+        this.endAutoReturnTimer = this.scene.time.delayedCall(8000, () => {
+            if (this.core?.gameState === 'ended') this.onReturnLobby();
+        });
+    }
+
+    hideEndScreen() {
+        if (this.endAutoReturnTimer) {
+            this.endAutoReturnTimer.remove(false);
+            this.endAutoReturnTimer = null;
+        }
+        this.endScreenContainer.setVisible(false);
+        this.endScreenContainer.removeAll(true);
+        this._endSignature = '';
+    }
+
+    createHandDrawnButton(x, y, width, height, text, onClick) {
+        const container = this.scene.add.container(x, y);
+        const bg = this.scene.add.rectangle(0, 0, width, height, 0xffffff, 1).setStrokeStyle(3, 0x000000).setInteractive({ cursor: 'pointer' });
+        const label = this.scene.add.text(0, 0, text, {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '20px', color: '#000'
+        }).setOrigin(0.5);
+        bg.on('pointerover', () => bg.setFillStyle(0xeeeeee, 1));
+        bg.on('pointerout', () => bg.setFillStyle(0xffffff, 1));
+        bg.on('pointerdown', onClick);
+        container.add([bg, label]);
+        return [container];
+    }
+
+    getRoundStateText() {
+        const stateText = this.core.gameState === 'selecting'
+            ? '选择行动'
+            : this.core.gameState === 'resolving'
+                ? '结算中'
+                : this.core.gameState === 'idle'
+                    ? '准备中'
+                    : '已结束';
+        return `第 ${this.core.currentRound} 轮 · ${stateText}`;
+    }
+
     describeState() {
         if (this.core.gameState === 'selecting') return '选择阶段';
         if (this.core.gameState === 'resolving') return '结算阶段';
@@ -116,10 +327,20 @@ export class BattlePresentationManager {
     cleanup() {
         if (this._disposed) return;
         this._disposed = true;
+        this.hideEndScreen();
         this.animationManager.cleanup();
+        this.clearHud();
+        this.hudContainer.destroy();
+        this.pendingHint.destroy();
         this.logContainer.removeAll(true);
         this.logContainer.destroy();
+        this.endScreenContainer.destroy();
         this.logContainer = null;
+        this.hudContainer = null;
+        this.pendingHint = null;
+        this.endScreenContainer = null;
         this._logSignature = '';
+        this._hudSignature = '';
+        this._endSignature = '';
     }
 }

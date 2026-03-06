@@ -17,6 +17,24 @@ const io = new Server(server, {
 let rooms = {};
 
 const DISCONNECT_GRACE_MS = 12000;
+const DEFAULT_ROOM_SETTINGS = Object.freeze({
+  autoResolve: true,
+  roundTimeMs: 5000,
+});
+
+function normalizeRoomSettings(input = {}) {
+  const autoResolve = typeof input.autoResolve === 'boolean'
+    ? input.autoResolve
+    : DEFAULT_ROOM_SETTINGS.autoResolve;
+  const rawRoundTime = typeof input.roundTimeMs === 'number' && Number.isFinite(input.roundTimeMs)
+    ? input.roundTimeMs
+    : DEFAULT_ROOM_SETTINGS.roundTimeMs;
+
+  return {
+    autoResolve,
+    roundTimeMs: Math.max(2000, Math.min(30000, Math.round(rawRoundTime))),
+  };
+}
 
 function normalizeRoomId(input) {
   const normalized = String(input || '').trim().toLowerCase();
@@ -82,6 +100,7 @@ function getRoomState(roomId) {
   if (!room) return null;
   return {
     roomId,
+    settings: normalizeRoomSettings(room.settings),
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
@@ -113,6 +132,7 @@ io.on('connection', (socket) => {
       game: null,
       gameInstance: game,
       lastState: null,
+      settings: { ...DEFAULT_ROOM_SETTINGS },
       disconnectTimers: {},
     };
 
@@ -189,7 +209,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('startGame', (roomId) => {
+  socket.on('startGame', (roomId, settings = {}) => {
     const room = rooms[roomId];
     if (!room) return;
 
@@ -204,9 +224,21 @@ io.on('connection', (socket) => {
     }
 
     if (room.game) return;
+    room.settings = normalizeRoomSettings(settings || room.settings);
     room.game = { started: true };
     room.lastState = null;
     io.to(roomId).emit('gameStarted', getRoomState(roomId));
+    emitRoomState(roomId);
+  });
+
+  socket.on('updateRoomSettings', (roomId, settings = {}) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const isHost = room.players[0] && room.players[0].id === socket.id;
+    if (!isHost || room.game) return;
+
+    room.settings = normalizeRoomSettings(settings);
     emitRoomState(roomId);
   });
 

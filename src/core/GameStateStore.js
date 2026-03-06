@@ -70,6 +70,9 @@ export class GameStateStore {
   applySnapshot(snap) {
     if (!snap || typeof snap !== 'object' || !this.game) return;
     const core = this.game;
+    if (snap.matchSettings && typeof snap.matchSettings === 'object') {
+      core.applyMatchSettings?.(snap.matchSettings, { reschedule: false });
+    }
     // Basic fields
     if (typeof snap.round === 'number') core.currentRound = snap.round;
     const nextState = snap.state || snap.gameState;

@@ -44,6 +44,23 @@
             <div id="room-id-display"></div>
             <div id="room-link-display"></div>
           </div>
+          <div id="lobby-match-settings" class="room-meta hidden">
+            <div class="match-settings-row">
+              <label for="lobby-auto-resolve-select">结算模式</label>
+              <select id="lobby-auto-resolve-select">
+                <option value="auto">自动结算</option>
+                <option value="manual">手动结算</option>
+              </select>
+            </div>
+            <div class="match-settings-row">
+              <label for="lobby-round-time-input">自动倒计时</label>
+              <div class="match-settings-inline">
+                <input id="lobby-round-time-input" type="number" min="2" max="30" step="1" value="5" />
+                <span>秒</span>
+              </div>
+            </div>
+            <p id="lobby-match-settings-hint" class="match-settings-hint">房主可在开始游戏前配置联机结算方式。</p>
+          </div>
           <div class="player-list-container">
             <ul id="player-list"></ul>
           </div>
