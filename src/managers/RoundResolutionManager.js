@@ -1,10 +1,13 @@
 // src/managers/RoundResolutionManager.js
 // Visualizes chosen actions during the resolving phase with explicit lifecycle cleanup.
 
-export class RoundResolutionManager {
+import { BattleLayoutManager } from './BattleLayoutManager.js';
+
+export class BattleAnimationManager {
   constructor(core, scene) {
     this.core = core;
     this.scene = scene;
+    this.layout = new BattleLayoutManager(scene);
     this.nodes = [];
     this.timers = [];
     this._active = true;
@@ -24,6 +27,12 @@ export class RoundResolutionManager {
     }
     this.timers.forEach(timer => timer?.remove?.(false));
     this.timers = [];
+    this.clearSprites();
+    this._signature = '';
+  }
+
+  reset() {
+    if (!this._active) return;
     this.clearSprites();
     this._signature = '';
   }
@@ -66,7 +75,10 @@ export class RoundResolutionManager {
   }
 
   clearSprites() {
-    this.nodes.forEach(node => node?.destroy?.());
+    this.nodes.forEach(node => {
+      this.scene.tweens.killTweensOf(node);
+      node?.destroy?.();
+    });
     this.nodes = [];
     this.timers.forEach(timer => timer?.remove?.(false));
     this.timers = [];
@@ -74,14 +86,13 @@ export class RoundResolutionManager {
 
   buildSprites() {
     const core = this.core;
-    const { width, height } = this.scene.scale;
     const players = core.players || [];
     if (!players.length) return;
 
     const selfId = (window && window.localPlayerId) || players[0]?.id;
     const self = players.find(player => player.id === selfId);
     const others = players.filter(player => player.id !== selfId);
-    const positions = this.computePositions(others.length, width, height);
+    const positions = this.layout.getActionSpritePositions(others.length);
 
     others.forEach((player, index) => {
       const position = positions[index];
@@ -102,9 +113,11 @@ export class RoundResolutionManager {
     if (self?.currentAction) {
       const key = this.getActionImageKey(self.currentAction);
       if (key) {
-        const selfSize = Math.max(140, Math.min(width * 0.26, 220));
-        const sx = width / 2;
-        const sy = height - selfSize * 0.42;
+        const { width } = this.scene.scale;
+        const selfSize = Math.max(112, Math.min(width * 0.24, 220));
+        const selfPosition = this.layout.getSelfActionPosition(selfSize);
+        const sx = selfPosition.x;
+        const sy = selfPosition.y;
         const sprite = this.trackNode(this.scene.add.image(sx, sy, key)
           .setDisplaySize(selfSize, selfSize)
           .setDepth(23)
@@ -142,16 +155,15 @@ export class RoundResolutionManager {
   getPlayerPosition(player) {
     const players = this.core.players || [];
     const selfId = (window && window.localPlayerId) || players[0]?.id;
-    const { width, height } = this.scene.scale;
 
     if (player.id === selfId) {
-      return { x: width / 2, y: height - 120 };
+      return this.layout.getSelfActionPosition();
     }
 
     const others = players.filter(p => p.id !== selfId);
     const index = others.findIndex(p => p.id === player.id);
     if (index === -1) return null;
-    return this.computePositions(others.length, width, height)[index] || null;
+    return this.layout.getActionSpritePositions(others.length)[index] || null;
   }
 
   createLineBlast(x1, y1, x2, y2) {
@@ -220,37 +232,9 @@ export class RoundResolutionManager {
     return `${type}_${level}.jpg`;
   }
 
-  computePositions(count, width, height) {
-    const positions = [];
-    if (count <= 0) return positions;
-    const marginX = 96;
-    const topY = 124;
-    const rightX = width - marginX;
-    const leftX = marginX;
-    const sideTopY = 138;
-    const sideBottomY = height * 0.68;
-
-    const topCount = Math.ceil(count / 3);
-    const rightCount = Math.floor((count - topCount) / 2);
-    const leftCount = count - topCount - rightCount;
-
-    for (let i = 0; i < topCount; i++) {
-      const t = (i + 1) / (topCount + 1);
-      positions.push({ x: marginX + t * (width - marginX * 2), y: topY });
-    }
-    for (let i = 0; i < rightCount; i++) {
-      const t = (i + 1) / (rightCount + 1);
-      positions.push({ x: rightX, y: sideTopY + t * (sideBottomY - sideTopY) });
-    }
-    for (let i = 0; i < leftCount; i++) {
-      const t = (i + 1) / (leftCount + 1);
-      positions.push({ x: leftX, y: sideTopY + t * (sideBottomY - sideTopY) });
-    }
-
-    return positions;
-  }
-
   showActionsAndResults(results = []) {
     return results;
   }
 }
+
+export class RoundResolutionManager extends BattleAnimationManager { }

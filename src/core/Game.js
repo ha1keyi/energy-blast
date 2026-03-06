@@ -194,6 +194,7 @@ export class Game {
         return {
             round: this.currentRound,
             isRunning: this.isRunning,
+            nextResolveAt: this.nextResolveAt,
             gameState: this.gameState,
             state: this.gameState,
             logs: this.logs,

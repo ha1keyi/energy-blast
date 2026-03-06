@@ -289,10 +289,10 @@ class LobbyManagerImpl {
     this._emit();
   }
 
-  createRoom(name, customRoomId = '') {
+  createRoom(name) {
     const action = () => {
       this.playerName = name;
-      this.socket.emit('createRoom', { name, roomId: customRoomId, playerKey: this.playerKey });
+      this.socket.emit('createRoom', { name, playerKey: this.playerKey });
       // Optimistic update: add self to list immediately
       if (this.playerId && !this.serverPlayers.some(p => p.id === this.playerId)) {
         this.serverPlayers.push({ id: this.playerId, name, ready: false });

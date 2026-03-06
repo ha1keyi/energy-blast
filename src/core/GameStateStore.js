@@ -76,6 +76,8 @@ export class GameStateStore {
     if (typeof nextState === 'string') core.gameState = nextState;
     if (typeof snap.isRunning === 'boolean') core.isRunning = snap.isRunning;
     else if (typeof nextState === 'string') core.isRunning = nextState === 'selecting' || nextState === 'resolving';
+    if (typeof snap.nextResolveAt === 'number' && Number.isFinite(snap.nextResolveAt)) core.nextResolveAt = snap.nextResolveAt;
+    else if (core.gameState !== 'selecting') core.nextResolveAt = null;
     if (Array.isArray(snap.logs)) core.logs = snap.logs.slice();
 
     // Players by name preferred (fallback to id)

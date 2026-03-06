@@ -103,15 +103,7 @@ io.on('connection', (socket) => {
   console.info('Client connected:', socket.id);
 
   socket.on('createRoom', (payload = {}) => {
-    const requestedRoomId = normalizeRoomId(payload.roomId);
-    if (payload.roomId && requestedRoomId === null) {
-      return socket.emit('error', 'Room ID must be 3-24 chars: a-z, 0-9, _ or -');
-    }
-
-    const roomId = requestedRoomId || generateRoomId();
-    if (rooms[roomId]) {
-      return socket.emit('error', 'Room already exists');
-    }
+    const roomId = generateRoomId();
 
     const playerKey = getPlayerKey(payload, socket);
     // Initialize server-side game instance

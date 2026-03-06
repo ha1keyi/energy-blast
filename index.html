@@ -8,12 +8,20 @@
   <title>Energy Blast</title>
 </head>
 
-<body>
+<body class="app-loading">
   <div id="app">
+    <div id="app-loading-screen" aria-live="polite"
+      style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;background:#f8f8f8;z-index:2000;">
+      <div class="loading-card"
+        style="width:min(100%,360px);padding:28px 24px;text-align:center;background:#fff;border:3px solid #222;border-radius:18px 26px 14px 24px;box-shadow:8px 8px 0 #222;">
+        <h1>Energy Blast</h1>
+        <p>加载战斗场景与房间状态...</p>
+      </div>
+    </div>
     <!-- Phaser canvas parent; Phaser will insert a canvas here -->
     <div id="game-canvas"></div>
     <!-- HTML UI overlay -->
-    <div id="ui-layer">
+    <div id="ui-layer" hidden>
       <div id="ui-container">
         <!-- 主页 -->
         <div id="home-screen">
@@ -23,7 +31,6 @@
             <button id="start-game-btn" class="interactive">创建房间</button>
             <button id="join-room-toggle-btn" class="interactive">加入房间</button>
           </div>
-          <input id="create-room-input" class="home-room-input" type="text" maxlength="24" placeholder="自定义房间号（可选）" />
           <div id="join-room-form" class="hidden join-room-form">
             <input id="join-room-input" type="text" placeholder="输入房间 ID" maxlength="24" />
             <button id="join-room-confirm-btn" class="interactive">确认加入</button>

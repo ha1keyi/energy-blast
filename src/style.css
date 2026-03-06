@@ -19,10 +19,58 @@ body {
   overflow: hidden;
 }
 
+body.app-loading {
+  overflow: hidden;
+}
+
+body.app-loading #game-canvas,
+body.app-loading #ui-layer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.app-ready #game-canvas,
+body.app-ready #ui-layer {
+  opacity: 1;
+  transition: opacity .24s ease;
+}
+
 #app {
   position: relative;
   width: 100vw;
   height: 100vh;
+}
+
+#app-loading-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.98) 42%),
+    repeating-linear-gradient(-8deg, rgba(34, 34, 34, 0.06) 0 12px, transparent 12px 26px);
+}
+
+.loading-card {
+  width: min(100%, 360px);
+  padding: 28px 24px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.96);
+  border: 3px solid #222;
+  border-radius: 18px 26px 14px 24px;
+  box-shadow: 8px 8px 0 #222;
+}
+
+.loading-card h1 {
+  margin-bottom: 10px;
+}
+
+.loading-card p {
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 #game-canvas {
@@ -108,7 +156,6 @@ button:active {
   flex-wrap: wrap;
 }
 
-.home-room-input,
 .join-room-form input {
   width: min(100%, 280px);
   margin-top: 12px;
@@ -390,7 +437,6 @@ button:active {
     font-size: 12px;
   }
 
-  .home-room-input,
   .join-room-form input {
     width: 100%;
   }
@@ -416,5 +462,13 @@ button:active {
 
   .action-btn em.energy {
     font-size: 10px;
+  }
+
+  .loading-card {
+    padding: 24px 18px;
+  }
+
+  .loading-card h1 {
+    font-size: 2.25rem;
   }
 }

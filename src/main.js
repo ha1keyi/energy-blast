@@ -82,10 +82,12 @@ LobbyManager.connect();
     sock.off && sock.off('rematchStarted');
     sock.on('rematchStarted', () => {
       clearEndReturnTimer();
+      LobbyManager.lastSnapshot = null;
       if (window.game) {
         window.game.isRunning = false;
         window.game.gameState = 'idle';
         window.game.currentRound = 0;
+        window.game.nextResolveAt = null;
         window.game.logs = [];
         if (window.game.store) window.game.store.clearLogs();
       }
@@ -153,7 +155,6 @@ const homeScreen = document.getElementById('home-screen');
 const lobbyScreen = document.getElementById('lobby-screen');
 const startBtn = document.getElementById('start-game-btn');
 const joinToggleBtn = document.getElementById('join-room-toggle-btn');
-const createRoomInput = document.getElementById('create-room-input');
 const joinRoomFormEl = document.getElementById('join-room-form');
 const joinRoomInput = document.getElementById('join-room-input');
 const joinRoomConfirmBtn = document.getElementById('join-room-confirm-btn');
@@ -167,6 +168,34 @@ const roomIdDisplayEl = document.getElementById('room-id-display');
 const roomLinkDisplayEl = document.getElementById('room-link-display');
 const actionBarEl = document.getElementById('action-bar');
 const gameCanvasEl = document.getElementById('game-canvas');
+const appLoadingScreenEl = document.getElementById('app-loading-screen');
+const uiLayerEl = document.getElementById('ui-layer');
+
+let appReady = false;
+
+function markAppReady() {
+  if (appReady) return;
+  appReady = true;
+  uiLayerEl?.removeAttribute('hidden');
+  document.body.classList.remove('app-loading');
+  document.body.classList.add('app-ready');
+  appLoadingScreenEl?.classList.add('hidden');
+}
+
+function waitForAppReady() {
+  const pageLoaded = document.readyState === 'complete'
+    ? Promise.resolve()
+    : new Promise(resolve => window.addEventListener('load', resolve, { once: true }));
+  const fontsReady = document.fonts?.ready?.catch?.(() => { }) || Promise.resolve();
+
+  Promise.all([pageLoaded, fontsReady]).finally(() => {
+    requestAnimationFrame(() => setTimeout(markAppReady, 120));
+  });
+
+  setTimeout(markAppReady, 1800);
+}
+
+waitForAppReady();
 
 // Default to lobby/home first; game canvas is shown only while a match is running.
 gameCanvasEl?.classList.add('hidden');
@@ -302,6 +331,7 @@ function getSelectedActionLabel(player) {
 function cleanupMatchState({ clearLogs = true, clearPlayers = true } = {}) {
   window.pendingAttack = null;
   clearEndReturnTimer();
+  if (clearLogs) LobbyManager.lastSnapshot = null;
 
   if (gameSyncIntervalId) {
     clearInterval(gameSyncIntervalId);
@@ -309,6 +339,14 @@ function cleanupMatchState({ clearLogs = true, clearPlayers = true } = {}) {
   }
 
   gameCore.clearTimer?.();
+  if (gameCore.battlePresentationManager?.cleanup) {
+    gameCore.battlePresentationManager.cleanup();
+    gameCore.battlePresentationManager = null;
+  }
+  if (gameCore.battleAnimationManager?.cleanup) {
+    gameCore.battleAnimationManager.cleanup();
+    gameCore.battleAnimationManager = null;
+  }
   if (gameCore.roundResolutionManager?.cleanup) {
     gameCore.roundResolutionManager.cleanup();
     gameCore.roundResolutionManager = null;
@@ -324,6 +362,14 @@ function cleanupMatchState({ clearLogs = true, clearPlayers = true } = {}) {
     gameCore.logs = [];
     gameCore.store?.clearLogs?.();
   }
+
+  gameCore.store?.updateState?.({
+    round: gameCore.currentRound,
+    state: gameCore.gameState,
+    isRunning: gameCore.isRunning,
+    players: clearPlayers ? [] : gameCore.players.map(player => player.getStatus()),
+    logs: gameCore.logs,
+  });
 
   hideActionBar();
 }
@@ -346,6 +392,7 @@ function ensureHostRoundTimer() {
 function returnToLobby({ resetRoom = false } = {}) {
   endHandled = false;
   LobbyManager.gameStarted = false;
+  LobbyManager.lastSnapshot = null;
   cleanupMatchState({ clearLogs: true, clearPlayers: true });
 
   if (window.phaserGame && window.phaserGame.scene.isActive('GameScene')) {
@@ -604,8 +651,7 @@ function renderLobby() {
 
 startBtn?.addEventListener('click', async () => {
   const goOnlineFlow = async (playerName) => {
-    const customRoomId = (createRoomInput?.value || '').trim().toLowerCase();
-    LobbyManager.createRoom(playerName, customRoomId);
+    LobbyManager.createRoom(playerName);
     homeScreen.classList.add('hidden');
     lobbyScreen.classList.remove('hidden');
   };
@@ -686,8 +732,13 @@ shareBtn?.addEventListener('click', () => {
 
 function startGame({ force = false, snapshot = null } = {}) {
   if (!force && !LobbyManager.allReady()) return;
-  if (gameCore.isRunning && phaserGame.scene.isActive('GameScene')) return;
   clearEndReturnTimer();
+  const snapshotState = snapshot?.state || snapshot?.gameState || '';
+  const resumeSnapshot = snapshot && (snapshotState === 'selecting' || snapshotState === 'resolving') ? snapshot : null;
+
+  if (phaserGame.scene.isActive('GameScene')) {
+    phaserGame.scene.stop('GameScene');
+  }
 
   // Hide DOM UI; game runs on canvas
   document.getElementById('ui-container')?.classList.add('hidden');
@@ -716,8 +767,11 @@ function startGame({ force = false, snapshot = null } = {}) {
     localPlayerId = (gameCore.players[0] && gameCore.players[0].id) || 1;
   }
   window.localPlayerId = localPlayerId;
-  if (snapshot) {
-    gameCore.store?.applySnapshot?.(snapshot);
+  if (resumeSnapshot) {
+    gameCore.store?.applySnapshot?.(resumeSnapshot);
+  } else {
+    LobbyManager.lastSnapshot = null;
+    gameCore.store?.updateState?.(gameCore.getGameState());
   }
   let lastRound = gameCore.currentRound;
   const syncUI = () => {

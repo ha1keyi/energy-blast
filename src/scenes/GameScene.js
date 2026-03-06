@@ -1,6 +1,8 @@
 // src/scenes/GameScene.js
 import Phaser from 'phaser';
 import { LobbyManager } from '../managers/LobbyManager.js';
+import { BattleLayoutManager } from '../managers/BattleLayoutManager.js';
+import { BattlePresentationManager } from '../managers/BattlePresentationManager.js';
 
 // Resolve action images via Vite eager glob
 const actionImages = import.meta.glob('../assets/images/*.jpg', { eager: true });
@@ -27,6 +29,7 @@ export class GameScene extends Phaser.Scene {
     create() {
         // Hand-drawn black/white scene frame
         const { width, height } = this.scale;
+        this.layoutManager = new BattleLayoutManager(this);
         const g = this.add.graphics();
         g.fillStyle(0xffffff, 0.9).fillRect(0, 0, width, height);
         g.lineStyle(6, 0x000000, 1).strokeRect(6, 6, width - 12, height - 12);
@@ -41,29 +44,32 @@ export class GameScene extends Phaser.Scene {
         this.updateHUD();
 
         // Pending-attack hint text (center top)
-        this.pendingHint = this.add.text(Math.round(width / 2), 56, '请选择攻击目标…', {
+        const hintPosition = this.layoutManager.getPendingHintPosition();
+        this.pendingHint = this.add.text(hintPosition.x, hintPosition.y, '请选择攻击目标…', {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000', backgroundColor: '#fff'
         }).setOrigin(0.5).setDepth(20).setVisible(false);
 
-        // 新增：结算表现管理器（在 window.game 就绪后挂载）
+        // 新增：战斗表现管理器（动画 + 日志）
         const core = this.getCore && this.getCore();
         if (core) {
+            if (core.battlePresentationManager && typeof core.battlePresentationManager.cleanup === 'function') {
+                core.battlePresentationManager.cleanup();
+            }
+            if (core.battleAnimationManager && typeof core.battleAnimationManager.cleanup === 'function') {
+                core.battleAnimationManager.cleanup();
+            }
             if (core.roundResolutionManager && typeof core.roundResolutionManager.cleanup === 'function') {
                 core.roundResolutionManager.cleanup();
             }
+            core.battlePresentationManager = null;
+            core.battleAnimationManager = null;
             core.roundResolutionManager = null;
-            import('../managers/RoundResolutionManager.js').then(mod => {
-                const { RoundResolutionManager } = mod;
-                this.roundResolutionManager = new RoundResolutionManager(core, this);
-                core.roundResolutionManager = this.roundResolutionManager;
-            }).catch(err => {
-                console.warn('[GameScene] Failed to init RoundResolutionManager:', err);
-            });
+            this.battlePresentationManager = new BattlePresentationManager(core, this, this.layoutManager);
+            this.battleAnimationManager = this.battlePresentationManager.animationManager;
+            core.battlePresentationManager = this.battlePresentationManager;
+            core.battleAnimationManager = this.battleAnimationManager;
+            core.roundResolutionManager = this.battleAnimationManager;
         }
-
-        // 初始化战斗日志面板容器
-        this.battleLogContainer = this.add.container(0, 0).setDepth(25);
-        this._lastLogCount = 0;
 
         // 初始化结算画面容器
         this.endScreenContainer = this.add.container(0, 0).setDepth(100).setVisible(false);
@@ -75,8 +81,7 @@ export class GameScene extends Phaser.Scene {
             loop: true,
             callback: () => {
                 this.updateHUD();
-                // 动作图标+文本由 RoundResolutionManager 管理
-                this.updateBattleLogPanel();
+                this.battlePresentationManager?.refresh?.();
                 this.updatePendingHint();
                 this.updateEndScreen();
             }
@@ -92,6 +97,10 @@ export class GameScene extends Phaser.Scene {
 
     updatePendingHint() {
         const show = !!window.pendingAttack && this.getCore()?.gameState === 'selecting';
+        const hintPosition = this.layoutManager?.getPendingHintPosition?.();
+        if (hintPosition) {
+            this.pendingHint?.setPosition(hintPosition.x, hintPosition.y);
+        }
         this.pendingHint?.setVisible(show);
     }
 
@@ -106,6 +115,7 @@ export class GameScene extends Phaser.Scene {
         if (this.endScreenContainer.visible) return; // 已经显示了
 
         const { width, height } = this.scale;
+        const box = this.layoutManager.getEndScreenBox();
         this.endScreenContainer.removeAll(true);
         this.endScreenContainer.setVisible(true);
 
@@ -113,8 +123,8 @@ export class GameScene extends Phaser.Scene {
         const overlay = this.add.rectangle(0, 0, width, height, 0xffffff, 0.8).setOrigin(0, 0);
 
         // 结算框（手绘风格）
-        const boxW = 500, boxH = 300;
-        const boxX = width / 2, boxY = height / 2;
+        const boxW = box.width, boxH = box.height;
+        const boxX = box.x, boxY = box.y;
 
         const graphics = this.add.graphics();
         graphics.lineStyle(4, 0x000000, 1);
@@ -236,11 +246,23 @@ export class GameScene extends Phaser.Scene {
             this.endAutoReturnTimer.remove(false);
             this.endAutoReturnTimer = null;
         }
-        if (this.roundResolutionManager && typeof this.roundResolutionManager.cleanup === 'function') {
-            this.roundResolutionManager.cleanup();
-            this.roundResolutionManager = null;
+        if (this.battlePresentationManager && typeof this.battlePresentationManager.cleanup === 'function') {
+            this.battlePresentationManager.cleanup();
+            this.battlePresentationManager = null;
+        }
+        if (this.battleAnimationManager && typeof this.battleAnimationManager.cleanup === 'function') {
+            this.battleAnimationManager.cleanup();
+            this.battleAnimationManager = null;
         }
         const core = this.getCore && this.getCore();
+        if (core?.battlePresentationManager && typeof core.battlePresentationManager.cleanup === 'function') {
+            core.battlePresentationManager.cleanup();
+            core.battlePresentationManager = null;
+        }
+        if (core?.battleAnimationManager && typeof core.battleAnimationManager.cleanup === 'function') {
+            core.battleAnimationManager.cleanup();
+            core.battleAnimationManager = null;
+        }
         if (core?.roundResolutionManager && typeof core.roundResolutionManager.cleanup === 'function') {
             core.roundResolutionManager.cleanup();
             core.roundResolutionManager = null;
@@ -251,9 +273,6 @@ export class GameScene extends Phaser.Scene {
         this.actionSprites = [];
         this.pendingHint?.destroy?.();
         this.pendingHint = null;
-        this.battleLogContainer?.removeAll?.(true);
-        this.battleLogContainer?.destroy?.();
-        this.battleLogContainer = null;
         this.endScreenContainer?.removeAll?.(true);
         this.endScreenContainer?.destroy?.();
         this.endScreenContainer = null;
@@ -277,48 +296,7 @@ export class GameScene extends Phaser.Scene {
 
     // 统一的对手分布：在左/右边框的上75%区域，以及上边框内均匀分布
     getOpponentPositions(count, width, height) {
-        const positions = [];
-        if (count <= 0) return positions;
-
-        // 轨道：上边、左上75%、右上75%
-        const marginX = 70;
-        const topY = 70;
-        const leftX = marginX;
-        const rightX = width - marginX;
-        const sideTopY = 100;
-        const sideBottomY = height * 0.75; // 上 75%
-
-        // 当只有1人：上方正中
-        if (count === 1) {
-            positions.push({ x: width / 2, y: topY, align: 0.5 });
-            return positions;
-        }
-
-        // 其余：按比例将序列分配到三条边：上、右、左，保证两人时落在左右上方
-        const topCount = Math.ceil(count / 3);
-        const rightCount = Math.floor((count - topCount) / 2);
-        const leftCount = count - topCount - rightCount;
-
-        // 顶部均匀分布（避开左右边距）
-        for (let i = 0; i < topCount; i++) {
-            const t = (i + 1) / (topCount + 1);
-            const x = marginX + t * (width - marginX * 2);
-            positions.push({ x, y: topY, align: 0.5 });
-        }
-        // 右侧从上到下（上75%范围）
-        for (let i = 0; i < rightCount; i++) {
-            const t = (i + 1) / (rightCount + 1);
-            const y = sideTopY + t * (sideBottomY - sideTopY);
-            positions.push({ x: rightX, y, align: 1 });
-        }
-        // 左侧从上到下（上75%范围）
-        for (let i = 0; i < leftCount; i++) {
-            const t = (i + 1) / (leftCount + 1);
-            const y = sideTopY + t * (sideBottomY - sideTopY);
-            positions.push({ x: leftX, y, align: 0 });
-        }
-
-        return positions;
+        return this.layoutManager.getOpponentPositions(count, width, height);
     }
 
     // 改进的HUD更新方法：渲染对手与自己HUD，并提供对手点击选目标
@@ -373,7 +351,8 @@ export class GameScene extends Phaser.Scene {
         if (self) this.addPlayerHUD(width, height);
 
         // 底部状态条（轮数/阶段）
-        const roundState = this.add.text(Math.round(width / 2), height - 26, `第 ${core.currentRound} 轮 · ${core.gameState === 'selecting' ? '选择行动' : core.gameState === 'resolving' ? '结算中' : core.gameState === 'idle' ? '准备中' : '已结束'}`, {
+        const roundStatePosition = this.layoutManager.getRoundStatusPosition();
+        const roundState = this.add.text(roundStatePosition.x, roundStatePosition.y, `第 ${core.currentRound} 轮 · ${core.gameState === 'selecting' ? '选择行动' : core.gameState === 'resolving' ? '结算中' : core.gameState === 'idle' ? '准备中' : '已结束'}`, {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000', backgroundColor: '#fff'
         }).setOrigin(0.5, 1).setDepth(15);
         this.hudItems.push(roundState);
@@ -388,9 +367,13 @@ export class GameScene extends Phaser.Scene {
         const self = players.find(p => p.id === selfId);
         if (!self) return;
 
-        const playerHUD = this.add.container(width / 2, height - 80);
-        const shadow = this.add.rectangle(4, 4, 260, 80, 0x222222, 1);
-        const bg = this.add.rectangle(0, 0, 260, 80, 0xffffff, 1).setStrokeStyle(3, 0x000000);
+        const selfHudPosition = this.layoutManager.getSelfHudPosition();
+        const compact = this.layoutManager.getMetrics().compact;
+        const hudWidth = compact ? 220 : 260;
+        const hudHeight = compact ? 68 : 80;
+        const playerHUD = this.add.container(selfHudPosition.x, selfHudPosition.y);
+        const shadow = this.add.rectangle(4, 4, hudWidth, hudHeight, 0x222222, 1);
+        const bg = this.add.rectangle(0, 0, hudWidth, hudHeight, 0xffffff, 1).setStrokeStyle(3, 0x000000);
         const name = this.add.text(0, -20, `${self.name} (你)`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000' }).setOrigin(0.5, 0.5);
         const energy = this.add.text(-50, 10, `气: ${self.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000' });
         const health = this.add.text(50, 10, `❤️: ${self.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: self.health <= 0 ? '#ff0000' : '#000' });
@@ -401,41 +384,12 @@ export class GameScene extends Phaser.Scene {
 
     // 动作精灵位置沿用同一分布（上、右、左），但与HUD错位避免遮挡
     getActionSpritePositions(count, width, height) {
-        const positions = [];
-        if (count <= 0) return positions;
-        const marginX = 100;
-        const topY = 120;
-        const rightX = width - marginX;
-        const leftX = marginX;
-        const sideTopY = 130;
-        const sideBottomY = height * 0.75 - 40;
-
-        const topCount = Math.ceil(count / 3);
-        const rightCount = Math.floor((count - topCount) / 2);
-        const leftCount = count - topCount - rightCount;
-
-        for (let i = 0; i < topCount; i++) {
-            const t = (i + 1) / (topCount + 1);
-            const x = marginX + t * (width - marginX * 2);
-            positions.push({ x, y: topY });
-        }
-        for (let i = 0; i < rightCount; i++) {
-            const t = (i + 1) / (rightCount + 1);
-            const y = sideTopY + t * (sideBottomY - sideTopY);
-            positions.push({ x: rightX, y });
-        }
-        for (let i = 0; i < leftCount; i++) {
-            const t = (i + 1) / (leftCount + 1);
-            const y = sideTopY + t * (sideBottomY - sideTopY);
-            positions.push({ x: leftX, y });
-        }
-
-        return positions;
+        return this.layoutManager.getActionSpritePositions(count, width, height);
     }
 
     updateActionSprites() {
         // 已交由 RoundResolutionManager 统一管理；避免重复渲染
-        if (this.roundResolutionManager) return;
+        if (this.battleAnimationManager) return;
 
         const core = this.getCore();
         if (!core) return;
@@ -472,8 +426,9 @@ export class GameScene extends Phaser.Scene {
             const action = self.currentAction;
             const key = this.getActionImageKey(action);
             if (key) {
-                const sx = width / 2;
-                const sy = height - 160;
+                const selfPos = this.layoutManager.getSelfActionPosition(72);
+                const sx = selfPos.x;
+                const sy = selfPos.y;
                 const sprite = this.add.image(sx, sy, key).setDisplaySize(72, 72).setDepth(13).setOrigin(0.5);
                 this.actionSprites.push(sprite);
             }
@@ -517,49 +472,6 @@ export class GameScene extends Phaser.Scene {
 
     // 最近战斗日志面板：显示最近 8 条
     updateBattleLogPanel() {
-        const core = this.getCore && this.getCore();
-        if (!core) return;
-
-        const logs = core.logs || [];
-        if (!this.battleLogContainer) return;
-
-        // 仅当日志数量变化时重绘，减少开销
-        if (logs.length === this._lastLogCount) return;
-        this._lastLogCount = logs.length;
-
-        // 清理旧 panel
-        this.battleLogContainer.removeAll(true);
-
-        const { width, height } = this.scale;
-        const panelWidth = Math.min(420, Math.max(240, Math.floor(width * 0.44)));
-        const panelHeight = Math.min(170, Math.max(120, Math.floor(height * 0.28)));
-        const x = 16;
-
-        // Prefer high placement so it never collides with bottom action bar on desktop/mobile.
-        const y = 76;
-
-        const bg = this.add.rectangle(x, y, panelWidth, panelHeight, 0xffffff, 0.95)
-            .setStrokeStyle(3, 0x000000)
-            .setOrigin(0, 0);
-        const title = this.add.text(x + 12, y + 8, '战斗日志', {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000'
-        }).setOrigin(0, 0);
-
-        this.battleLogContainer.add([bg, title]);
-
-        const maxLines = Math.max(4, Math.floor((panelHeight - 38) / 18));
-        const recent = logs.slice(-maxLines);
-        let offsetY = y + 34;
-        recent.forEach(entry => {
-            const hasRound = entry && typeof entry === 'object' && entry.round != null;
-            const r = hasRound ? entry.round : '';
-            const msg = (entry && typeof entry === 'object' && entry.message != null) ? String(entry.message) : String(entry);
-            const text = (r === '' ? `${msg}` : `R${r}: ${msg}`);
-            const line = this.add.text(x + 12, offsetY, text, {
-                fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000'
-            }).setOrigin(0, 0);
-            this.battleLogContainer.add(line);
-            offsetY += 18;
-        });
+        this.battlePresentationManager?.refreshBattleLogPanel?.();
     }
 }
