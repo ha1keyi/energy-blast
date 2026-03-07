@@ -19,16 +19,70 @@ body {
   overflow: hidden;
 }
 
+body.app-loading {
+  overflow: hidden;
+}
+
+body.app-loading #game-canvas,
+body.app-loading #ui-layer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.app-ready #game-canvas,
+body.app-ready #ui-layer {
+  opacity: 1;
+  transition: opacity .24s ease;
+}
+
 #app {
   position: relative;
   width: 100vw;
   height: 100vh;
 }
 
+#app-loading-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.98) 42%),
+    repeating-linear-gradient(-8deg, rgba(34, 34, 34, 0.06) 0 12px, transparent 12px 26px);
+}
+
+.loading-card {
+  width: min(100%, 360px);
+  padding: 28px 24px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.96);
+  border: 3px solid #222;
+  border-radius: 18px 26px 14px 24px;
+  box-shadow: 8px 8px 0 #222;
+}
+
+.loading-card h1 {
+  margin-bottom: 10px;
+}
+
+.loading-card p {
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
 #game-canvas {
   position: absolute;
   inset: 0;
   z-index: 10;
+}
+
+#game-canvas.game-canvas-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 #ui-layer {
@@ -41,6 +95,16 @@ body {
 }
 
 #ui-layer .interactive {
+  pointer-events: auto;
+}
+
+#ui-layer input,
+#ui-layer select,
+#ui-layer textarea,
+#ui-layer label,
+#ui-layer option,
+#ui-layer .match-settings-inline,
+#ui-layer .join-room-form {
   pointer-events: auto;
 }
 
@@ -99,6 +163,99 @@ button:active {
   background: #eee;
   transform: translate(4px, 4px);
   box-shadow: 0 0 0 #222;
+}
+
+.home-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.join-room-form input {
+  width: min(100%, 280px);
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 3px solid #222;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: #222;
+}
+
+.join-room-form {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.room-meta {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 2px dashed #222;
+  border-radius: 12px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.room-meta #room-id-display {
+  font-size: 16px;
+  color: #111;
+}
+
+.room-meta #room-link-display {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #555;
+  word-break: break-all;
+}
+
+.match-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.match-settings-row:first-child {
+  margin-top: 0;
+}
+
+.match-settings-row label {
+  font-size: 14px;
+  color: #111;
+}
+
+.match-settings-row select,
+.match-settings-row input {
+  min-width: 96px;
+  padding: 6px 8px;
+  border: 2px solid #222;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: #222;
+}
+
+.match-settings-row input[disabled],
+.match-settings-row select[disabled] {
+  opacity: .65;
+  cursor: not-allowed;
+}
+
+.match-settings-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-settings-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #555;
 }
 
 .player-list-container {
@@ -187,6 +344,34 @@ button:active {
 
 .action-bar-status {
   font-size: 14px;
+  line-height: 1.45;
+}
+
+.action-bar-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  max-width: 640px;
+  flex-wrap: wrap;
+}
+
+.action-ready-summary {
+  font-size: 13px;
+  color: #444;
+}
+
+.action-round-btn {
+  min-width: 144px;
+}
+
+.action-round-btn.done,
+.action-round-btn:disabled {
+  background: #ddd;
+  color: #666;
+  box-shadow: 2px 2px 0 #999;
+  cursor: not-allowed;
 }
 
 .action-btn {
@@ -341,6 +526,10 @@ button:active {
     font-size: 12px;
   }
 
+  .join-room-form input {
+    width: 100%;
+  }
+
   .action-buttons {
     gap: 8px;
   }
@@ -362,5 +551,13 @@ button:active {
 
   .action-btn em.energy {
     font-size: 10px;
+  }
+
+  .loading-card {
+    padding: 24px 18px;
+  }
+
+  .loading-card h1 {
+    font-size: 2.25rem;
   }
 }

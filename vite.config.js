@@ -26,6 +26,17 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    assetsDir: 'assets'
+    assetsDir: 'assets',
+    chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('phaser')) return 'vendor-phaser';
+          if (id.includes('socket.io-client') || id.includes('engine.io-client')) return 'vendor-socket';
+          return 'vendor-core';
+        },
+      },
+    },
   }
 })
