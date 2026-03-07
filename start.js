@@ -18,10 +18,10 @@ function getLocalIP() {
 
 const localIP = getLocalIP();
 
-console.debug('Starting Energy Blast (start script)');
+console.info('Starting Energy Blast (start script)');
 
 // --- Step 1: Start Server ---
-console.debug('Starting server and dev tools');
+console.info('Starting server and dev tools');
 const server = spawn('npm', ['start'], {
     cwd: join(process.cwd(), 'server'),
     shell: true,
@@ -34,7 +34,7 @@ const server = spawn('npm', ['start'], {
 });
 
 // --- Step 2: Start ngrok ---
-console.debug('Starting ngrok (if available)');
+console.info('Starting ngrok (if available)');
 const ngrok = spawn('ngrok', ['start', '--config', 'ngrok.yml', '--all'], {
     shell: true,
     stdio: 'ignore' // We'll get URLs via API
@@ -98,7 +98,7 @@ async function getNgrokUrl(retries = 10) {
     }
 
     console.info(`Frontend public: ${frontendUrl || 'n/a'} — local: http://localhost:5173`);
-    console.debug('Starting Vite dev server for client');
+    console.info('Starting Vite dev server for client');
     const client = spawn('npm', ['run', 'dev', '--', '--host', '0.0.0.0'], {
         cwd: process.cwd(),
         shell: true,

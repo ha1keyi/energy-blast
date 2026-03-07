@@ -32,6 +32,27 @@ export class BattleFlowCoordinator {
         this.lastSocket = null;
     }
 
+    refreshGameViewport() {
+        const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, 1);
+        const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, 1);
+        const scaleManager = this.phaserGame?.scale;
+        const scene = this.phaserGame?.scene?.keys?.GameScene;
+
+        scaleManager?.resize?.(width, height);
+        scene?.scale?.resize?.(width, height);
+        scene?.cameras?.resize?.(width, height);
+    }
+
+    showGameCanvas() {
+        this.elements.gameCanvasEl?.classList.remove('game-canvas-hidden');
+        this.refreshGameViewport();
+        requestAnimationFrame(() => this.refreshGameViewport());
+    }
+
+    hideGameCanvas() {
+        this.elements.gameCanvasEl?.classList.add('game-canvas-hidden');
+    }
+
     init() {
         window.startGameFromLobby = (options) => this.startGame(options);
         window.returnToLobby = (options) => this.returnToLobby(options);
@@ -164,6 +185,7 @@ export class BattleFlowCoordinator {
         if (this.gameCore.gameState !== 'ended') {
             this.gameCore.gameState = 'selecting';
             this.gameCore.isRunning = true;
+            this.clearPendingAttack();
         }
         this.resolveLocalPlayerId();
         this.gameCore.scheduleResolveTimer?.({ force: true, deadlineAt: resolveAt });
@@ -208,6 +230,14 @@ export class BattleFlowCoordinator {
         return changed;
     }
 
+    clearPendingAttack(playerId = null) {
+        const pending = window.pendingAttack;
+        if (!pending) return false;
+        if (playerId != null && pending.selfId !== playerId) return false;
+        window.pendingAttack = null;
+        return true;
+    }
+
     ensurePlayerHasAction(player) {
         if (!player) return false;
         if (player.currentAction) return true;
@@ -243,6 +273,7 @@ export class BattleFlowCoordinator {
         if (this.gameCore.autoResolveEnabled) return;
         const player = this.getLocalPlayer();
         if (!player || !player.isAlive) return;
+        this.clearPendingAttack(player.id);
         if (!this.ensurePlayerHasAction(player)) {
             this.showToast('当前无法结束回合');
             return;
@@ -340,13 +371,16 @@ export class BattleFlowCoordinator {
 
             sock.off?.('gameStarted');
             sock.on('gameStarted', (roomState) => {
+                const hasSnapshot = !!(roomState && Object.prototype.hasOwnProperty.call(roomState, 'snapshot'));
+                const nextSnapshot = hasSnapshot ? (roomState.snapshot || null) : this.lobbyManager.lastSnapshot;
                 this.lobbyManager.gameStarted = true;
-                if (roomState?.snapshot) this.lobbyManager.lastSnapshot = roomState.snapshot;
+                this.lobbyManager.lastSnapshot = nextSnapshot;
                 if (roomState?.settings) this.lobbyManager.roomSettings = roomState.settings;
                 this.startGame({
                     force: true,
-                    snapshot: roomState?.snapshot || this.lobbyManager.lastSnapshot,
+                    snapshot: nextSnapshot,
                     settings: roomState?.settings || this.lobbyManager.getRoomSettings?.(),
+                    players: Array.isArray(roomState?.players) ? roomState.players : null,
                 });
             });
 
@@ -368,7 +402,7 @@ export class BattleFlowCoordinator {
     }
 
     cleanupMatchState({ clearLogs = true, clearPlayers = true } = {}) {
-        window.pendingAttack = null;
+        this.clearPendingAttack();
         window.localPlayerId = null;
         this.localPlayerId = null;
         this.pendingRoundStart = null;
@@ -432,7 +466,7 @@ export class BattleFlowCoordinator {
         if (this.phaserGame.scene.isActive('GameScene')) {
             this.phaserGame.scene.stop('GameScene');
         }
-        this.elements.gameCanvasEl?.classList.add('hidden');
+        this.hideGameCanvas();
 
         if (resetRoom) {
             this.lobbyManager.roomId = null;
@@ -468,7 +502,7 @@ export class BattleFlowCoordinator {
         let lastRound = this.gameCore.currentRound;
         const syncUI = () => {
             if (this.gameCore.gameState === 'selecting' && this.gameCore.currentRound !== lastRound) {
-                window.pendingAttack = null;
+                this.clearPendingAttack();
                 lastRound = this.gameCore.currentRound;
             }
 
@@ -480,7 +514,7 @@ export class BattleFlowCoordinator {
             }
 
             if (this.gameCore.gameState === 'ended') {
-                window.pendingAttack = null;
+                this.clearPendingAttack();
                 if (!this.endHandled) {
                     this.endHandled = true;
                     this.scheduleReturnToRoom();
@@ -492,7 +526,7 @@ export class BattleFlowCoordinator {
         this.gameSyncIntervalId = setInterval(syncUI, 250);
     }
 
-    startGame({ force = false, snapshot = null, settings = null } = {}) {
+    startGame({ force = false, snapshot = null, settings = null, players = null } = {}) {
         if (!force && !this.lobbyManager.allReady()) return;
 
         this.clearEndReturnTimer();
@@ -506,12 +540,14 @@ export class BattleFlowCoordinator {
         }
 
         document.getElementById('ui-container')?.classList.add('hidden');
-        this.elements.gameCanvasEl?.classList.remove('hidden');
+        this.showGameCanvas();
 
         this.cleanupMatchState({ clearLogs: true, clearPlayers: true });
         this.applyMatchSettings(effectiveSettings, { reschedule: false });
 
-        const lobbyPlayers = this.lobbyManager.list();
+        const lobbyPlayers = Array.isArray(players) && players.length
+            ? players
+            : this.lobbyManager.list();
         const selfLobby = this.lobbyManager.getSelf?.() || null;
         lobbyPlayers.forEach((player, index) => {
             this.gameCore.addPlayer(player.name, { isBot: !!player.isBot, networkId: player.id });
@@ -525,6 +561,8 @@ export class BattleFlowCoordinator {
         if (!this.phaserGame.scene.isActive('GameScene')) {
             try {
                 this.phaserGame.scene.start('GameScene');
+                this.refreshGameViewport();
+                requestAnimationFrame(() => this.refreshGameViewport());
             } catch (error) {
                 console.error('[BattleFlow] Failed to start GameScene:', error);
                 this.showToast('战斗场景加载失败，已返回房间');
@@ -591,6 +629,8 @@ export class BattleFlowCoordinator {
             return;
         }
 
+        this.clearPendingAttack(player.id);
+
         try {
             player.selectAction(actionKey, null);
             this.debugUI?.updatePlayerList?.();
@@ -618,7 +658,7 @@ export class BattleFlowCoordinator {
             this.emitCurrentAction(me);
             this.markLocalPlayerActionDirty();
             this.debugUI?.updatePlayerList?.();
-            window.pendingAttack = null;
+            this.clearPendingAttack(me.id);
             if (typeof window.showToast === 'function') window.showToast(`目标已选择：${target.name}`);
         } catch (error) {
             console.error(error);

@@ -15,10 +15,12 @@ if (typeof window !== 'undefined') {
 LobbyManager.connect();
 
 const gameCore = new Game();
-const debugUI = new DebugUIManager(gameCore);
-gameCore.setDebugUIManager(debugUI);
-debugUI.startUpdating();
-window.debugUI = debugUI;
+if (import.meta.env && import.meta.env.DEV) {
+  const debugUI = new DebugUIManager(gameCore);
+  gameCore.setDebugUIManager(debugUI);
+  debugUI.startUpdating();
+  window.debugUI = debugUI;
+}
 window.game = gameCore;
 window.lobby = LobbyManager;
 
@@ -89,7 +91,7 @@ function waitForAppReady() {
 }
 
 waitForAppReady();
-elements.gameCanvasEl?.classList.add('hidden');
+elements.gameCanvasEl?.classList.add('game-canvas-hidden');
 
 const nameModal = document.getElementById('name-modal');
 const nameInput = document.getElementById('player-name-input');

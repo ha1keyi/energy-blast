@@ -1,5 +1,5 @@
 ---
-name: game-quality-gates
+name: game-quality-gates-2.0.0
 description: Game development quality gates and mandatory checks. Activate when building, reviewing, debugging, or deploying any game project (H5/Canvas/WebGL/Phaser/Three.js/2D/3D). Covers state cleanup, lifecycle management, input handling, audio, persistence, networking, anti-cheat, and performance. Use as pre-deploy checklist or when diagnosing game-specific bugs (state leaks, phantom timers, buff conflicts, memory growth, touch issues).
 ---
 

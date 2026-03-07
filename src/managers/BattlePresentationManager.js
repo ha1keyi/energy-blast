@@ -19,10 +19,25 @@ export class BattlePresentationManager {
         this._logSignature = '';
         this._hudSignature = '';
         this._endSignature = '';
+        this.unsubscribeStore = this.core?.store?.subscribe?.(() => {
+            if (this._disposed || !this.scene?.sys?.isActive?.()) return;
+            this.refresh();
+        }) || null;
+    }
+
+    ensureAnimationManager() {
+        const needsRecreate = !this.animationManager || this.animationManager._active === false || this.animationManager.scene !== this.scene;
+        if (!needsRecreate) return;
+
+        this.animationManager = new BattleAnimationManager(this.core, this.scene);
+        if (this.core) {
+            this.core.battleAnimationManager = this.animationManager;
+        }
     }
 
     refresh() {
         if (this._disposed) return;
+        this.ensureAnimationManager();
         this.refreshHUD();
         this.refreshPendingHint();
         this.refreshBattleLogPanel();
@@ -319,6 +334,8 @@ export class BattlePresentationManager {
     cleanup() {
         if (this._disposed) return;
         this._disposed = true;
+        this.unsubscribeStore?.();
+        this.unsubscribeStore = null;
         this.hideEndScreen();
         this.animationManager.cleanup();
         this.clearHud();

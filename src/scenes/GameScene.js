@@ -27,6 +27,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     create() {
+        const viewportWidth = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, 1);
+        const viewportHeight = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, 1);
+        this.scale.resize(viewportWidth, viewportHeight);
+        this.cameras.resize(viewportWidth, viewportHeight);
+
         // Hand-drawn black/white scene frame
         const { width, height } = this.scale;
         this.layoutManager = new BattleLayoutManager(this);

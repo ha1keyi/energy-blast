@@ -150,7 +150,6 @@ export class LobbyFlowCoordinator {
                 btn.className = 'interactive';
                 btn.style.cssText = 'background-color: #2ecc71; color: white; border: none; margin-left: 10px;';
                 btn.onclick = () => {
-                    if (!this.lobbyManager.allReady()) return this.showToast('有玩家取消了准备');
                     const settings = this.getDraftMatchSettings();
                     const started = this.lobbyManager.startGame?.(settings);
                     if (!started && String(this.lobbyManager.roomId || '').startsWith('local-')) {

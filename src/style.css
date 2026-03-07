@@ -79,6 +79,12 @@ body.app-ready #ui-layer {
   z-index: 10;
 }
 
+#game-canvas.game-canvas-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 #ui-layer {
   position: absolute;
   inset: 0;
