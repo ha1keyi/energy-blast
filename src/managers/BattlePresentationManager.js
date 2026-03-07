@@ -7,7 +7,6 @@ export class BattlePresentationManager {
         this.scene = scene;
         this.layoutManager = options.layoutManager || new BattleLayoutManager(scene);
         this.onChooseTarget = options.onChooseTarget || (() => { });
-        this.onRematch = options.onRematch || (() => { });
         this.onReturnLobby = options.onReturnLobby || (() => { });
         this.animationManager = new BattleAnimationManager(core, scene);
         this.logContainer = this.scene.add.container(0, 0).setDepth(25);
@@ -16,7 +15,6 @@ export class BattlePresentationManager {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000', backgroundColor: '#fff'
         }).setOrigin(0.5).setDepth(20).setVisible(false);
         this.endScreenContainer = this.scene.add.container(0, 0).setDepth(100).setVisible(false);
-        this.endAutoReturnTimer = null;
         this._disposed = false;
         this._logSignature = '';
         this._hudSignature = '';
@@ -266,28 +264,22 @@ export class BattlePresentationManager {
         }).setOrigin(0.5);
 
         const resultText = winner ? `获胜者: ${winner.name}` : '没有活下来的玩家';
-        const result = this.scene.add.text(box.x, box.y - 20, resultText, {
+        const result = this.scene.add.text(box.x, box.y - 28, resultText, {
             fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '24px', color: '#000'
         }).setOrigin(0.5);
 
-        const rematchBtn = this.createHandDrawnButton(box.x - 90, box.y + 80, 160, 50, '再来一局', () => this.onRematch());
-        const exitBtn = this.createHandDrawnButton(box.x + 90, box.y + 80, 160, 50, '返回大厅', () => this.onReturnLobby());
+        const hint = this.scene.add.text(box.x, box.y + 18, '5 秒后自动返回房间', {
+            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#444'
+        }).setOrigin(0.5);
 
-        this.endScreenContainer.add([overlay, graphics, title, result, ...rematchBtn, ...exitBtn]);
+        const exitBtn = this.createHandDrawnButton(box.x, box.y + 84, 180, 52, '返回房间', () => this.onReturnLobby());
+
+        this.endScreenContainer.add([overlay, graphics, title, result, hint, ...exitBtn]);
         this.endScreenContainer.setAlpha(0);
         this.scene.tweens.add({ targets: this.endScreenContainer, alpha: 1, duration: 500, ease: 'Power2' });
-
-        if (this.endAutoReturnTimer) this.endAutoReturnTimer.remove(false);
-        this.endAutoReturnTimer = this.scene.time.delayedCall(8000, () => {
-            if (this.core?.gameState === 'ended') this.onReturnLobby();
-        });
     }
 
     hideEndScreen() {
-        if (this.endAutoReturnTimer) {
-            this.endAutoReturnTimer.remove(false);
-            this.endAutoReturnTimer = null;
-        }
         this.endScreenContainer.setVisible(false);
         this.endScreenContainer.removeAll(true);
         this._endSignature = '';

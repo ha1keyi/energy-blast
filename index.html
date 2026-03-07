@@ -108,21 +108,16 @@
       <!-- In-game Action Bar (visible during gameplay) -->
       <div id="action-bar" class="interactive hidden"></div>
 
-      <!-- Debug Panel (host-visible by default; can be forced via togglevisibility) -->
+      <!-- Debug Panel (hidden by default; open via console: toggleDebugPanel()) -->
       <div id="debug-panel" class="interactive"
-        style="position: fixed; right: 12px; top: 12px; z-index: 1100; background: #fff; color: #333; border: 2px solid #000; border-radius: 10px; padding: 10px 12px; box-shadow: 4px 4px 0 #000; min-width: 200px;">
+        style="display:none; position: fixed; right: 12px; top: 12px; z-index: 1100; background: #fff; color: #333; border: 2px solid #000; border-radius: 10px; padding: 10px 12px; box-shadow: 4px 4px 0 #000; min-width: 200px;">
         <div id="debug-panel-header" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
           <strong style="font-size:14px;">Debug 控制台</strong>
           <button id="debug-collapse-btn" class="interactive" style="margin:0; padding:2px 8px;">收起</button>
         </div>
         <div id="debug-panel-body">
-          <div style="font-size:12px; color:#666; margin-bottom:4px;">Ctrl+Shift+D 折叠/展开</div>
-          <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px;">
-            <input id="debug-auto-checkbox" type="checkbox" /> 自动结算
-          </label>
+          <div style="font-size:12px; color:#666; margin-bottom:4px;">控制台输入 toggleDebugPanel() 打开或关闭</div>
           <div style="display:flex; gap:8px; margin-top:8px;">
-            <button id="debug-resolve-btn" class="interactive"
-              style="margin:0; background:#27ae60; color:#fff; flex:1;">立即结算</button>
             <button id="debug-refresh-btn" class="interactive"
               style="margin:0; background:#3498db; color:#fff; flex:1;">刷新面板</button>
           </div>

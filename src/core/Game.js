@@ -12,6 +12,8 @@ export class Game {
         this.players = players;
         this.roundTime = roundTime;
         this.autoResolveEnabled = true;
+        this.lifecycleVersion = 0;
+        this.pendingAsyncTimers = new Set();
         this.currentRound = 0;
         this.isRunning = false;
         this.timer = null;
@@ -32,6 +34,12 @@ export class Game {
             autoResolve: !!this.autoResolveEnabled,
             roundTimeMs: this.roundTime,
         };
+    }
+
+    isNetworkAuthoritativeTimer() {
+        if (typeof window === 'undefined' || !window.lobby) return false;
+        const roomId = window.lobby.roomId;
+        return !!(window.lobby.connected && roomId && !String(roomId).startsWith('local-'));
     }
 
     applyMatchSettings(settings = {}, { reschedule = true } = {}) {
@@ -96,6 +104,25 @@ export class Game {
 
     getAlivePlayers() {
         return this.players.filter(p => p.isAlive);
+    }
+
+    setPlayerRoundReady(playerId, ready = true) {
+        const player = this.players.find(p => p.id === playerId || p.networkId === playerId);
+        if (!player || !player.isAlive) return false;
+        player.roundReady = !!ready;
+        this.nextFrame();
+        return true;
+    }
+
+    getRoundReadySummary() {
+        const activePlayers = this.getAlivePlayers().filter(player => !player.isBot);
+        const readyPlayers = activePlayers.filter(player => player.roundReady);
+        return {
+            readyCount: readyPlayers.length,
+            totalCount: activePlayers.length,
+            allReady: activePlayers.length > 0 && readyPlayers.length === activePlayers.length,
+            pendingPlayers: activePlayers.filter(player => !player.roundReady),
+        };
     }
 
     startGame() {
@@ -180,7 +207,47 @@ export class Game {
         }
     }
 
-    scheduleResolveTimer({ force = false } = {}) {
+    invalidateAsyncWork({ resetDeadline = true } = {}) {
+        this.lifecycleVersion++;
+        this.pendingAsyncTimers.forEach((timerId) => clearTimeout(timerId));
+        this.pendingAsyncTimers.clear();
+        this.clearResolveTimer(resetDeadline);
+    }
+
+    wait(ms, lifecycleVersion = this.lifecycleVersion) {
+        return new Promise((resolve) => {
+            const timerId = setTimeout(() => {
+                this.pendingAsyncTimers.delete(timerId);
+                resolve(this.lifecycleVersion === lifecycleVersion);
+            }, ms);
+            this.pendingAsyncTimers.add(timerId);
+        });
+    }
+
+    scheduleResolveTimer({ force = false, deadlineAt = null } = {}) {
+        if (this.isNetworkAuthoritativeTimer()) {
+            this.clearTimer();
+            if (!this.autoResolveEnabled) {
+                this.nextResolveAt = null;
+                return;
+            }
+
+            if (typeof deadlineAt === 'number' && Number.isFinite(deadlineAt)) {
+                this.nextResolveAt = deadlineAt;
+                return;
+            }
+
+            if (force && this.isRunning && this.gameState === 'selecting') {
+                this.nextResolveAt = Date.now() + this.roundTime;
+                return;
+            }
+
+            if (typeof this.nextResolveAt !== 'number' || !Number.isFinite(this.nextResolveAt)) {
+                this.nextResolveAt = null;
+            }
+            return;
+        }
+
         const isHost = (typeof window !== 'undefined' && window.lobby && window.lobby.isHost && window.lobby.isHost());
         if (!(isHost && this.autoResolveEnabled && this.isRunning && this.gameState === 'selecting')) {
             this.nextResolveAt = null;
@@ -248,6 +315,7 @@ export class Game {
                     energyGain: p.currentAction.energyGain,
                 } : null,
                 networkId: p.networkId,
+                roundReady: !!p.roundReady,
                 targetId: p.target ? p.target.id : null,
                 targetNetworkId: p.target ? p.target.networkId : null,
                 targetName: p.target ? p.target.name : null,
@@ -258,6 +326,8 @@ export class Game {
     endGame() {
         this.isRunning = false;
         this.clearTimer();
+        this.pendingAsyncTimers.forEach((timerId) => clearTimeout(timerId));
+        this.pendingAsyncTimers.clear();
         this.nextResolveAt = null;
         this.gameState = 'ended';
         if (this.debugUIManager) {

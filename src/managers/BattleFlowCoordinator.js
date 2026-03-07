@@ -1,6 +1,8 @@
 import { ACTIONS } from '../core/constants/Actions.js';
 import { ActionType } from '../core/enums/ActionType.js';
 
+const DEFAULT_ACTION_KEYS = ['STORE_1', 'ATTACK_1', 'DEFEND_1', 'REBOUND_1', 'ATTACK_2'];
+
 export class BattleFlowCoordinator {
     constructor({
         gameCore,
@@ -25,14 +27,15 @@ export class BattleFlowCoordinator {
         this.gameSyncIntervalId = null;
         this.endHandled = false;
         this.endReturnTimerId = null;
-        this.lastBroadcast = { round: 0, state: '', logs: 0 };
-        this.lastBroadcastAt = 0;
+        this.pendingResolveRound = null;
+        this.pendingRoundStart = null;
         this.lastSocket = null;
     }
 
     init() {
         window.startGameFromLobby = (options) => this.startGame(options);
         window.returnToLobby = (options) => this.returnToLobby(options);
+        window.battleFlow = this;
         this.bindNetworkSync();
         this.lobbyManager.subscribe(() => this.syncFromLobbyState());
         this.syncFromLobbyState();
@@ -52,7 +55,7 @@ export class BattleFlowCoordinator {
             if (this.gameCore.gameState === 'ended') {
                 this.returnToLobby();
             }
-        }, 2200);
+        }, 5000);
     }
 
     findCorePlayerByRemoteId(remoteId) {
@@ -64,6 +67,207 @@ export class BattleFlowCoordinator {
         )) || null;
     }
 
+    getLocalPlayer() {
+        const players = this.gameCore.players || [];
+        if (!players.length) return null;
+
+        const resolvedId = this.resolveLocalPlayerId();
+        if (resolvedId != null) {
+            const found = players.find((player) => player.id === resolvedId);
+            if (found) return found;
+        }
+
+        if (!this.isNetworkAuthoritativeMatch()) {
+            return players[0] || null;
+        }
+        return null;
+    }
+
+    resolveLocalPlayerId() {
+        const players = this.gameCore.players || [];
+        if (!players.length) return null;
+
+        const candidates = [];
+        if (window.localPlayerId != null) candidates.push(window.localPlayerId);
+        if (this.localPlayerId != null) candidates.push(this.localPlayerId);
+
+        const lobbySelf = this.lobbyManager.getSelf?.();
+        if (lobbySelf?.id != null) {
+            const mapped = players.find((player) => player.networkId === lobbySelf.id);
+            if (mapped) {
+                this.localPlayerId = mapped.id;
+                window.localPlayerId = mapped.id;
+                return mapped.id;
+            }
+        }
+
+        if (this.lobbyManager.playerId != null) {
+            const mapped = players.find((player) => player.networkId === this.lobbyManager.playerId);
+            if (mapped) {
+                this.localPlayerId = mapped.id;
+                window.localPlayerId = mapped.id;
+                return mapped.id;
+            }
+        }
+
+        if (this.lobbyManager.playerName) {
+            const mapped = players.find((player) => player.name === this.lobbyManager.playerName);
+            if (mapped) {
+                this.localPlayerId = mapped.id;
+                window.localPlayerId = mapped.id;
+                return mapped.id;
+            }
+        }
+
+        for (const id of candidates) {
+            const found = players.find((player) => player.id === id);
+            if (found) {
+                this.localPlayerId = found.id;
+                window.localPlayerId = found.id;
+                return found.id;
+            }
+        }
+
+        if (!this.isNetworkAuthoritativeMatch()) {
+            const fallback = players[0] || null;
+            if (!fallback) return null;
+            this.localPlayerId = fallback.id;
+            window.localPlayerId = fallback.id;
+            return fallback.id;
+        }
+
+        return null;
+    }
+
+    getActionKeyByPlayer(player) {
+        if (!player?.currentAction) return '';
+        const { type, level, name } = player.currentAction;
+        const entry = Object.entries(ACTIONS).find(([, cfg]) => (
+            cfg.type === type && cfg.level === level && cfg.name === name
+        ));
+        return entry ? entry[0] : '';
+    }
+
+    getReadySummary() {
+        return this.gameCore.getRoundReadySummary?.() || { readyCount: 0, totalCount: 0, allReady: false, pendingPlayers: [] };
+    }
+
+    isNetworkAuthoritativeMatch() {
+        return !!this.gameCore.isNetworkAuthoritativeTimer?.();
+    }
+
+    applyNetworkRoundStart({ round, autoResolve, roundTimeMs, resolveAt } = {}) {
+        this.gameCore.applyMatchSettings?.({ autoResolve, roundTimeMs }, { reschedule: false });
+        if (typeof round === 'number') {
+            this.gameCore.currentRound = round;
+        }
+        if (this.gameCore.gameState !== 'ended') {
+            this.gameCore.gameState = 'selecting';
+            this.gameCore.isRunning = true;
+        }
+        this.resolveLocalPlayerId();
+        this.gameCore.scheduleResolveTimer?.({ force: true, deadlineAt: resolveAt });
+        this.gameCore.nextFrame?.();
+    }
+
+    flushPendingRoundStart() {
+        if (!this.pendingRoundStart) return;
+        const payload = this.pendingRoundStart;
+        this.pendingRoundStart = null;
+        this.applyNetworkRoundStart(payload);
+    }
+
+    canResolveOnHost() {
+        return !!(
+            this.lobbyManager.isHost?.() &&
+            this.gameCore.isRunning &&
+            this.gameCore.gameState === 'selecting'
+        );
+    }
+
+    maybeResolveRound() {
+        if (this.isNetworkAuthoritativeMatch()) return;
+        if (!this.canResolveOnHost()) return;
+        if (!this.getReadySummary().allReady) return;
+        this.gameCore.clearResolveTimer?.();
+        this.gameCore.processRound?.();
+        this.broadcastStateNow();
+    }
+
+    setPlayerRoundReady(player, ready, { emit = false } = {}) {
+        if (!player) return false;
+        const changed = !!player.roundReady !== !!ready;
+        player.roundReady = !!ready;
+        if (changed) {
+            this.gameCore.nextFrame?.();
+            this.debugUI?.updateGameState?.();
+            if (emit && this.lobbyManager.socket && this.lobbyManager.roomId) {
+                this.lobbyManager.socket.emit('setRoundReady', this.lobbyManager.roomId, !!ready);
+            }
+        }
+        return changed;
+    }
+
+    ensurePlayerHasAction(player) {
+        if (!player) return false;
+        if (player.currentAction) return true;
+        try {
+            player.selectAction('STORE_1', null);
+            return true;
+        } catch (error) {
+            console.warn('[BattleFlow] Failed to auto-select STORE_1:', error);
+            return false;
+        }
+    }
+
+    emitCurrentAction(player) {
+        if (!player || !this.lobbyManager.socket || !this.lobbyManager.roomId) return;
+        const actionKey = this.getActionKeyByPlayer(player);
+        if (!actionKey) return;
+        const targetNetworkId = player.target?.networkId ?? player.target?.id ?? null;
+        this.lobbyManager.socket.emit('selectAction', this.lobbyManager.roomId, actionKey, targetNetworkId);
+    }
+
+    markLocalPlayerActionDirty() {
+        const player = this.getLocalPlayer();
+        if (!player) return;
+        if (!this.gameCore.autoResolveEnabled) {
+            this.setPlayerRoundReady(player, false, { emit: true });
+        } else {
+            this.setPlayerRoundReady(player, false, { emit: false });
+            this.gameCore.nextFrame?.();
+        }
+    }
+
+    finishLocalRound() {
+        if (this.gameCore.autoResolveEnabled) return;
+        const player = this.getLocalPlayer();
+        if (!player || !player.isAlive) return;
+        if (!this.ensurePlayerHasAction(player)) {
+            this.showToast('当前无法结束回合');
+            return;
+        }
+
+        this.emitCurrentAction(player);
+        this.setPlayerRoundReady(player, true, { emit: true });
+        this.maybeResolveRound();
+    }
+
+    applyRemoteRoundReady(playerId, ready) {
+        if (this.gameCore.autoResolveEnabled) return;
+        const player = this.findCorePlayerByRemoteId(playerId);
+        if (!player) return;
+        this.setPlayerRoundReady(player, ready, { emit: false });
+        this.maybeResolveRound();
+    }
+
+    broadcastStateNow() {
+        const core = this.gameCore;
+        if (!core || !this.lobbyManager.connected || !this.lobbyManager.roomId || !this.lobbyManager.isHost?.()) return;
+        const state = core.getGameState();
+        this.lobbyManager.socket.emit('roundResolved', this.lobbyManager.roomId, state);
+    }
+
     bindNetworkSync() {
         const tryBind = () => {
             const sock = this.lobbyManager.socket;
@@ -73,15 +277,18 @@ export class BattleFlowCoordinator {
 
             sock.off?.('roundResolved');
             sock.on('roundResolved', (state) => {
-                if (this.gameCore && (!this.lobbyManager.isHost() || !this.gameCore.isRunning)) {
+                if (this.gameCore && (!this.lobbyManager.isHost?.() || !this.gameCore.isRunning)) {
                     this.gameCore.store?.applySnapshot?.(state);
                 }
+                if ((state?.state || state?.gameState) === 'ended') {
+                    this.scheduleReturnToRoom();
+                }
+                this.pendingResolveRound = null;
             });
 
             sock.off?.('actionSelected');
             sock.on('actionSelected', ({ playerId, actionKey, targetId }) => {
-                if (!this.lobbyManager.isHost() || !this.gameCore) return;
-
+                if (!this.lobbyManager.isHost?.() || !this.gameCore) return;
                 const player = this.findCorePlayerByRemoteId(playerId);
                 if (!player) return;
 
@@ -93,9 +300,42 @@ export class BattleFlowCoordinator {
                 try {
                     player.selectAction(actionKey, target);
                     this.debugUI?.updatePlayerList?.();
-                } catch (e) {
-                    console.warn('[Host] Failed to sync action:', e);
+                } catch (error) {
+                    console.warn('[Host] Failed to sync action:', error);
                 }
+            });
+
+            sock.off?.('roundStarted');
+            sock.on('roundStarted', ({ round, autoResolve, roundTimeMs, resolveAt }) => {
+                const payload = { round, autoResolve, roundTimeMs, resolveAt };
+                if (!this.gameCore.isRunning || !(this.gameCore.players || []).length) {
+                    this.pendingRoundStart = payload;
+                    this.gameCore.applyMatchSettings?.({ autoResolve, roundTimeMs }, { reschedule: false });
+                    return;
+                }
+                this.applyNetworkRoundStart(payload);
+            });
+
+            sock.off?.('roundResolveRequested');
+            sock.on('roundResolveRequested', async ({ round }) => {
+                this.gameCore.clearResolveTimer?.();
+                if (!this.lobbyManager.isHost?.()) {
+                    if (this.gameCore.isRunning && this.gameCore.gameState === 'selecting') {
+                        this.gameCore.gameState = 'resolving';
+                        this.gameCore.nextFrame?.();
+                    }
+                    return;
+                }
+
+                if (this.pendingResolveRound === round || this.gameCore.gameState === 'resolving') return;
+                this.pendingResolveRound = round;
+                await this.gameCore.processRound?.();
+                this.broadcastStateNow();
+            });
+
+            sock.off?.('roundReadyChanged');
+            sock.on('roundReadyChanged', ({ playerId, ready }) => {
+                this.applyRemoteRoundReady(playerId, ready);
             });
 
             sock.off?.('gameStarted');
@@ -116,45 +356,10 @@ export class BattleFlowCoordinator {
                 if (reason) this.showToast(`对局结束：${reason}`);
                 this.returnToLobby();
             });
-
-            sock.off?.('rematchStarted');
-            sock.on('rematchStarted', () => {
-                this.clearEndReturnTimer();
-                this.lobbyManager.lastSnapshot = null;
-                if (this.gameCore) {
-                    this.gameCore.isRunning = false;
-                    this.gameCore.gameState = 'idle';
-                    this.gameCore.currentRound = 0;
-                    this.gameCore.nextResolveAt = null;
-                    this.gameCore.logs = [];
-                    this.gameCore.store?.clearLogs?.();
-                }
-                this.returnToLobby();
-            });
         };
 
         this.lobbyManager.subscribe(tryBind);
         tryBind();
-
-        setInterval(() => this.broadcastTick(), 400);
-    }
-
-    broadcastTick() {
-        const core = this.gameCore;
-        if (!core || !this.lobbyManager.connected || !this.lobbyManager.roomId || !this.lobbyManager.isHost()) return;
-
-        const snap = { round: core.currentRound, state: core.gameState, logs: core.logs?.length || 0 };
-        const shouldHeartbeat = (Date.now() - this.lastBroadcastAt) > 1200;
-        if (
-            snap.round !== this.lastBroadcast.round ||
-            snap.state !== this.lastBroadcast.state ||
-            snap.logs !== this.lastBroadcast.logs ||
-            shouldHeartbeat
-        ) {
-            this.lobbyManager.socket.emit('roundResolved', this.lobbyManager.roomId, core.getGameState());
-            this.lastBroadcast = snap;
-            this.lastBroadcastAt = Date.now();
-        }
     }
 
     applyMatchSettings(settings, { reschedule = false } = {}) {
@@ -166,6 +371,7 @@ export class BattleFlowCoordinator {
         window.pendingAttack = null;
         window.localPlayerId = null;
         this.localPlayerId = null;
+        this.pendingRoundStart = null;
         this.clearEndReturnTimer();
         if (clearLogs) this.lobbyManager.lastSnapshot = null;
 
@@ -174,7 +380,7 @@ export class BattleFlowCoordinator {
             this.gameSyncIntervalId = null;
         }
 
-        this.gameCore.clearTimer?.();
+        this.gameCore.invalidateAsyncWork?.();
         if (this.gameCore.battlePresentationManager?.cleanup) {
             this.gameCore.battlePresentationManager.cleanup();
             this.gameCore.battlePresentationManager = null;
@@ -204,18 +410,16 @@ export class BattleFlowCoordinator {
     }
 
     ensureHostRoundTimer() {
+        if (this.isNetworkAuthoritativeMatch()) return;
         if (!this.gameCore?.isRunning || this.gameCore.gameState !== 'selecting') return;
-        const isHost = this.lobbyManager.isHost && this.lobbyManager.isHost();
-        if (!isHost) {
+        if (!this.lobbyManager.isHost?.()) {
             this.gameCore.clearResolveTimer?.(false);
             return;
         }
-
         if (!this.gameCore.autoResolveEnabled) {
             this.gameCore.clearResolveTimer?.();
             return;
         }
-
         this.gameCore.scheduleResolveTimer?.();
     }
 
@@ -244,7 +448,7 @@ export class BattleFlowCoordinator {
 
     syncFromLobbyState() {
         const snapshotState = this.lobbyManager.lastSnapshot?.state || this.lobbyManager.lastSnapshot?.gameState || '';
-        const canResumeActiveMatch = snapshotState === 'selecting' || snapshotState === 'resolving';
+        const canResumeActiveMatch = ['selecting', 'resolving', 'ended'].includes(snapshotState);
         if (this.lobbyManager.gameStarted && this.lobbyManager.roomId && !this.gameCore.isRunning && canResumeActiveMatch) {
             setTimeout(() => {
                 if (this.lobbyManager.gameStarted && !this.gameCore.isRunning) {
@@ -285,15 +489,16 @@ export class BattleFlowCoordinator {
         };
 
         if (this.gameSyncIntervalId) clearInterval(this.gameSyncIntervalId);
-        this.gameSyncIntervalId = setInterval(syncUI, 300);
+        this.gameSyncIntervalId = setInterval(syncUI, 250);
     }
 
     startGame({ force = false, snapshot = null, settings = null } = {}) {
         if (!force && !this.lobbyManager.allReady()) return;
 
         this.clearEndReturnTimer();
+        this.endHandled = false;
         const snapshotState = snapshot?.state || snapshot?.gameState || '';
-        const resumeSnapshot = snapshot && (snapshotState === 'selecting' || snapshotState === 'resolving') ? snapshot : null;
+        const resumeSnapshot = snapshot && ['selecting', 'resolving', 'ended'].includes(snapshotState) ? snapshot : null;
         const effectiveSettings = settings || resumeSnapshot?.matchSettings || this.lobbyManager.getRoomSettings?.();
 
         if (this.phaserGame.scene.isActive('GameScene')) {
@@ -308,34 +513,48 @@ export class BattleFlowCoordinator {
 
         const lobbyPlayers = this.lobbyManager.list();
         const selfLobby = this.lobbyManager.getSelf?.() || null;
-        lobbyPlayers.forEach((player, idx) => {
+        lobbyPlayers.forEach((player, index) => {
             this.gameCore.addPlayer(player.name, { isBot: !!player.isBot, networkId: player.id });
-            const added = this.gameCore.players[idx];
+            const added = this.gameCore.players[index];
             if (selfLobby && player.id === selfLobby.id && added) {
                 this.localPlayerId = added.id;
             }
         });
 
         this.gameCore.startGame();
-        this.endHandled = false;
-
         if (!this.phaserGame.scene.isActive('GameScene')) {
-            this.phaserGame.scene.start('GameScene');
+            try {
+                this.phaserGame.scene.start('GameScene');
+            } catch (error) {
+                console.error('[BattleFlow] Failed to start GameScene:', error);
+                this.showToast('战斗场景加载失败，已返回房间');
+                this.returnToLobby();
+                return;
+            }
         }
 
         if (!this.localPlayerId) {
-            this.localPlayerId = (this.gameCore.players[0] && this.gameCore.players[0].id) || 1;
+            this.localPlayerId = this.resolveLocalPlayerId() || (this.gameCore.players[0] && this.gameCore.players[0].id) || 1;
         }
         window.localPlayerId = this.localPlayerId;
 
         if (resumeSnapshot) {
             this.gameCore.store?.applySnapshot?.(resumeSnapshot);
+            if (snapshotState === 'ended') {
+                this.endHandled = true;
+                this.scheduleReturnToRoom();
+            }
         } else {
             this.lobbyManager.lastSnapshot = null;
             this.gameCore.store?.updateState?.(this.gameCore.getGameState());
         }
 
         this.startUiSync();
+        this.flushPendingRoundStart();
+        this.ensureHostRoundTimer();
+        if (!this.isNetworkAuthoritativeMatch()) {
+            this.broadcastStateNow();
+        }
     }
 
     getSelectedActionLabel(player) {
@@ -349,19 +568,25 @@ export class BattleFlowCoordinator {
     }
 
     getActionHeaderLabel(isHost) {
+        const summary = this.getReadySummary();
+        const readyLabel = `已结束 ${summary.readyCount}/${summary.totalCount}`;
         if (!this.gameCore.autoResolveEnabled) {
-            return isHost ? '结算：手动' : '结算：等待房主';
+            return `${isHost ? '手动结算' : '等待全员结束'} · ${readyLabel}`;
         }
 
         const remain = this.gameCore.nextResolveAt ? Math.max(0, this.gameCore.nextResolveAt - Date.now()) : 0;
-        const secLabel = !isHost && !this.gameCore.nextResolveAt ? '同步中' : `${Math.ceil(remain / 1000)}s`;
+        const secLabel = !this.gameCore.nextResolveAt ? '同步中' : `${Math.ceil(remain / 1000)}s`;
         return `倒计时：${secLabel}`;
     }
 
     onChooseAction(player, actionKey) {
+        if (!player || player.roundReady) return;
         const cfg = ACTIONS[actionKey];
+        if (!cfg) return;
+
         if (cfg.type === ActionType.ATTACK) {
             window.pendingAttack = { selfId: player.id, actionKey };
+            this.markLocalPlayerActionDirty();
             this.showActionBar();
             return;
         }
@@ -369,51 +594,91 @@ export class BattleFlowCoordinator {
         try {
             player.selectAction(actionKey, null);
             this.debugUI?.updatePlayerList?.();
-        } catch (e) {
-            this.showToast(e.message);
+        } catch (error) {
+            this.showToast(error.message);
             return;
         }
 
-        this.lobbyManager.socket?.emit('selectAction', this.lobbyManager.roomId, actionKey, null);
+        this.emitCurrentAction(player);
+        this.markLocalPlayerActionDirty();
         this.showActionBar();
+    }
+
+    onTargetChosen(targetPlayer) {
+        const core = this.gameCore;
+        const pending = window.pendingAttack;
+        if (!core || !pending) return;
+
+        const me = this.getLocalPlayer();
+        const target = core.players.find((player) => player.id === targetPlayer.id);
+        if (!me || !target || me.roundReady) return;
+
+        try {
+            me.selectAction(pending.actionKey, target);
+            this.emitCurrentAction(me);
+            this.markLocalPlayerActionDirty();
+            this.debugUI?.updatePlayerList?.();
+            window.pendingAttack = null;
+            if (typeof window.showToast === 'function') window.showToast(`目标已选择：${target.name}`);
+        } catch (error) {
+            console.error(error);
+            if (typeof window.showToast === 'function') window.showToast(error.message || '选择失败');
+        }
     }
 
     showActionBar() {
         if (!this.gameCore.isRunning || this.gameCore.gameState !== 'selecting') return this.hideActionBar();
         const players = this.gameCore.players || [];
-        const selfId = window.localPlayerId || players[0]?.id;
-        const me = players.find((player) => player.id === selfId);
+        const me = this.getLocalPlayer();
         if (!me || !me.isAlive) return this.hideActionBar();
 
-        const keys = ['STORE_1', 'ATTACK_1', 'DEFEND_1', 'REBOUND_1', 'ATTACK_2'].filter((key) => ACTIONS[key]);
-        const availability = keys.map((key) => {
+        const availability = DEFAULT_ACTION_KEYS.filter((key) => ACTIONS[key]).map((key) => {
             const cfg = ACTIONS[key];
-            let can = me.energy >= (cfg.energyCost || 0);
+            let can = !me.roundReady && me.energy >= (cfg.energyCost || 0);
             if (cfg.type === ActionType.ATTACK) {
-                const hasTarget = this.gameCore.players.some((player) => player.id !== me.id && player.isAlive);
+                const hasTarget = players.some((player) => player.id !== me.id && player.isAlive);
                 can = can && hasTarget;
             }
             return { key, can };
         });
 
+        const readySummary = this.getReadySummary();
         const sig = JSON.stringify({
             round: this.gameCore.currentRound,
             meId: me.id,
             energy: me.energy,
             autoResolveEnabled: this.gameCore.autoResolveEnabled,
+            nextResolveAt: this.gameCore.nextResolveAt,
+            meReady: !!me.roundReady,
+            pendingAttack: window.pendingAttack?.actionKey || '',
+            readySummary,
+            players: players.map((player) => ({ id: player.id, ready: !!player.roundReady })),
             availability,
         });
-        const isHost = this.lobbyManager.isHost && this.lobbyManager.isHost();
+        const isHost = this.lobbyManager.isHost?.();
         const actionBarEl = this.elements.actionBarEl;
 
         if (actionBarEl.dataset && actionBarEl.dataset.sig === sig && !actionBarEl.classList.contains('hidden')) {
             const header = document.getElementById('action-bar-header');
             const statusEl = document.getElementById('action-bar-status');
+            const readySummaryEl = document.getElementById('action-ready-summary');
+            const finishBtn = document.getElementById('action-finish-round-btn');
             if (header) {
                 header.textContent = `回合 ${this.gameCore.currentRound} · 状态：选择阶段 · ${this.getActionHeaderLabel(isHost)}`;
             }
             if (statusEl) {
-                statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy} · Selected: ${this.getSelectedActionLabel(me)}`;
+                statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy} · 已选：${this.getSelectedActionLabel(me)}${me.roundReady ? ' · 已结束回合' : ''}`;
+            }
+            if (readySummaryEl && !this.gameCore.autoResolveEnabled) {
+                const pendingNames = readySummary.pendingPlayers.map((player) => player.name).join('、');
+                readySummaryEl.textContent = readySummary.allReady
+                    ? '所有玩家都已结束回合。'
+                    : `等待：${pendingNames || '无'}`;
+            }
+            if (finishBtn && !this.gameCore.autoResolveEnabled) {
+                finishBtn.textContent = me.roundReady ? '已结束回合' : '结束回合';
+                finishBtn.disabled = !!me.roundReady;
+                finishBtn.className = `action-round-btn${me.roundReady ? ' done' : ''}`;
             }
             return;
         }
@@ -431,12 +696,11 @@ export class BattleFlowCoordinator {
         const statusEl = document.createElement('div');
         statusEl.id = 'action-bar-status';
         statusEl.className = 'action-bar-status';
-        statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy} · Selected: ${this.getSelectedActionLabel(me)}`;
+        statusEl.textContent = `我：生命 ${me.health} 气 ${me.energy} · 已选：${this.getSelectedActionLabel(me)}${me.roundReady ? ' · 已结束回合' : ''}`;
         actionBarEl.appendChild(statusEl);
 
         const buttonRow = document.createElement('div');
         buttonRow.className = 'action-buttons';
-
         availability.forEach(({ key, can }) => {
             const cfg = ACTIONS[key];
             const btn = document.createElement('button');
@@ -444,13 +708,37 @@ export class BattleFlowCoordinator {
             const imgName = `${key.toLowerCase()}.jpg`;
             const imgSrc = this.imageMap[imgName] || '';
             btn.innerHTML = `<img alt="${cfg.name}" src="${imgSrc}"/><span>${cfg.name}</span><em class="energy">耗气:${cfg.energyCost}</em>`;
+            btn.disabled = !can;
             if (can) {
                 btn.onclick = () => this.onChooseAction(me, key);
             }
             buttonRow.appendChild(btn);
         });
-
         actionBarEl.appendChild(buttonRow);
+
+        if (!this.gameCore.autoResolveEnabled) {
+            const controls = document.createElement('div');
+            controls.className = 'action-bar-controls';
+
+            const readySummaryEl = document.createElement('div');
+            readySummaryEl.id = 'action-ready-summary';
+            readySummaryEl.className = 'action-ready-summary';
+            const pendingNames = readySummary.pendingPlayers.map((player) => player.name).join('、');
+            readySummaryEl.textContent = readySummary.allReady
+                ? '所有玩家都已结束回合。'
+                : `等待：${pendingNames || '无'}`;
+            controls.appendChild(readySummaryEl);
+
+            const finishBtn = document.createElement('button');
+            finishBtn.id = 'action-finish-round-btn';
+            finishBtn.className = `action-round-btn${me.roundReady ? ' done' : ''}`;
+            finishBtn.textContent = me.roundReady ? '已结束回合' : '结束回合';
+            finishBtn.disabled = !!me.roundReady;
+            finishBtn.onclick = () => this.finishLocalRound();
+            controls.appendChild(finishBtn);
+
+            actionBarEl.appendChild(controls);
+        }
     }
 
     hideActionBar() {

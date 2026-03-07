@@ -8,6 +8,7 @@ export class DebugUIManager {
     this.game = game;
     this.isAutoResolve = game?.autoResolveEnabled ?? true;
     this.visible = false;
+    this.manuallyOpened = false;
     this.isCollapsed = false;
     this._editorBound = false;
     this._editorSignature = '';
@@ -21,38 +22,24 @@ export class DebugUIManager {
   }
 
   startUpdating() {
-    // 控制可见性：只有房主默认可见，且支持强制显示
     this.updateVisibility();
-    // 订阅 Lobby 变化以动态调整
     LobbyManager.subscribe(() => this.updateVisibility());
-    // 绑定面板控件与全局命令
     this.attachControls();
     if (typeof window !== 'undefined') {
-      window.toggleDebugPanel = () => { this.toggleCollapsed(); };
-      window.togglevisibility = window.toggleDebugPanel; // 兼容旧命令
-      window.setAutoResolve = (val) => { this.setAutoResolve(val); this.updateVisibility(); };
-      window.resolveNow = async () => { if (this.game?.processRound) await this.game.processRound(); };
-      // 非房主也允许手动触发一次结算（仅本地显示，不广播）
-      window.resolveLocal = async () => { if (this.game?.processRound) await this.game.processRound(); };
-
-      // Listen for Ctrl+Shift+D
-      document.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
-          e.preventDefault();
-          this.toggleCollapsed();
-        }
-      });
+      window.toggleDebugPanel = () => {
+        this.manuallyOpened = !this.manuallyOpened;
+        this.updateVisibility();
+        if (this.manuallyOpened) this.renderPlayerEditor(true);
+      };
     }
 
-    // Keep debug data panel fresh while visible.
     setInterval(() => {
       this.renderPlayerEditor();
     }, 350);
   }
 
   updateVisibility() {
-    const isHost = !!LobbyManager.roomId && LobbyManager.isHost();
-    const shouldShow = isHost;
+    const shouldShow = !!this.manuallyOpened;
     this.visible = shouldShow;
     const panel = document.getElementById('debug-panel');
     if (panel) {
@@ -61,26 +48,18 @@ export class DebugUIManager {
   }
 
   toggleCollapsed() {
-    if (!(!!LobbyManager.roomId && LobbyManager.isHost())) return;
+    if (!this.visible) return;
     this.isCollapsed = !this.isCollapsed;
     this.applyCollapsedState();
   }
 
   setAutoResolve(val) {
-    if (this.isNetworkMatchActive()) {
-      this.syncControlStateFromGame();
-      return;
-    }
     this.isAutoResolve = !!val;
-    this.game?.applyMatchSettings?.({ autoResolve: this.isAutoResolve }, { reschedule: true });
     this.syncControlStateFromGame();
   }
 
   syncControlStateFromGame() {
     this.isAutoResolve = this.game?.autoResolveEnabled ?? this.isAutoResolve;
-    const checkbox = document.getElementById('debug-auto-checkbox');
-    if (checkbox) checkbox.checked = this.isAutoResolve;
-    this.syncTimerControls();
   }
 
   attachControls() {
@@ -92,16 +71,6 @@ export class DebugUIManager {
       collapseBtn.onclick = () => this.toggleCollapsed();
     }
 
-    const checkbox = document.getElementById('debug-auto-checkbox');
-    if (checkbox) {
-      checkbox.checked = this.isAutoResolve;
-      checkbox.onchange = () => this.setAutoResolve(checkbox.checked);
-    }
-    const resolveBtn = document.getElementById('debug-resolve-btn');
-    if (resolveBtn) {
-      resolveBtn.onclick = async () => { if (this.game?.processRound) await this.game.processRound(); };
-    }
-
     const refreshBtn = document.getElementById('debug-refresh-btn');
     if (refreshBtn) {
       refreshBtn.onclick = () => this.renderPlayerEditor(true);
@@ -109,27 +78,7 @@ export class DebugUIManager {
 
     this.bindPlayerEditorEvents();
     this.applyCollapsedState();
-    this.syncTimerControls();
     this.renderPlayerEditor(true);
-  }
-
-  syncTimerControls() {
-    const checkbox = document.getElementById('debug-auto-checkbox');
-    const resolveBtn = document.getElementById('debug-resolve-btn');
-    const locked = this.isNetworkMatchActive();
-    const isSelecting = !!(this.game?.isRunning && this.game?.gameState === 'selecting');
-    const autoResolveEnabled = this.game?.autoResolveEnabled ?? this.isAutoResolve;
-    if (checkbox) {
-      checkbox.checked = autoResolveEnabled;
-      checkbox.disabled = locked;
-      checkbox.title = locked ? '联机对战请在开局前于房间设置中修改' : '';
-    }
-    if (resolveBtn) {
-      resolveBtn.disabled = !isSelecting || (locked && autoResolveEnabled);
-      resolveBtn.title = locked && autoResolveEnabled
-        ? '当前为自动结算模式，需在开局前改为手动结算'
-        : '';
-    }
   }
 
   applyCollapsedState() {

@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--isolated",
+        "--headless",
+        "--output-dir",
+        "${workspaceFolder}/test-results/mcp",
+        "--save-trace"
+      ],
+      "env": {
+        "PLAYWRIGHT_MCP_BROWSER": "msedge",
+        "PLAYWRIGHT_MCP_TEST_ID_ATTRIBUTE": "data-testid"
+      }
+    }
+  }
+}

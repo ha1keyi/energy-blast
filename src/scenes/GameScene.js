@@ -49,7 +49,6 @@ export class GameScene extends Phaser.Scene {
             this.battlePresentationManager = new BattlePresentationManager(core, this, {
                 layoutManager: this.layoutManager,
                 onChooseTarget: (player) => this.chooseTarget(player),
-                onRematch: () => this.handleRematch(),
                 onReturnLobby: () => this.handleReturnLobby(),
             });
             this.battleAnimationManager = this.battlePresentationManager.animationManager;
@@ -120,42 +119,9 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    handleRematch() {
-        // request rematch
-        const socket = LobbyManager.socket;
-        const roomId = LobbyManager.roomId;
-        if (socket && roomId) {
-            socket.emit('requestRematch', roomId);
-        } else {
-            // 本地模式重置
-            this.getCore()?.startGame();
-        }
-    }
-
     chooseTarget(targetPlayer) {
-        const core = this.getCore();
-        if (!core) return;
-        const pending = window.pendingAttack;
-        if (!pending) return;
-
-        const me = core.players.find(p => p.id === (window.localPlayerId || core.players[0]?.id));
-        const target = core.players.find(p => p.id === targetPlayer.id);
-        if (!me || !target) return;
-        try {
-            me.selectAction(pending.actionKey, target);
-            // 同步给可能存在的服务器（占位）
-            if (LobbyManager?.socket && LobbyManager?.roomId) {
-                const targetNetworkId = target?.networkId ?? target?.id ?? targetPlayer?.id;
-                LobbyManager.socket.emit('selectAction', LobbyManager.roomId, pending.actionKey, targetNetworkId);
-            }
-            if (window.debugUI && typeof window.debugUI.updatePlayerList === 'function') {
-                window.debugUI.updatePlayerList();
-            }
-            window.pendingAttack = null;
-            if (typeof window.showToast === 'function') window.showToast(`目标已选择：${target.name}`);
-        } catch (e) {
-            console.error(e);
-            if (typeof window.showToast === 'function') window.showToast(e.message || '选择失败');
+        if (window.battleFlow && typeof window.battleFlow.onTargetChosen === 'function') {
+            window.battleFlow.onTargetChosen(targetPlayer);
         }
     }
 

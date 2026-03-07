@@ -65,13 +65,13 @@ export class LobbyFlowCoordinator {
             } else if (canEdit) {
                 hint.textContent = settings.autoResolve
                     ? '房主可在开局前配置自动结算与倒计时时长。'
-                    : '当前为手动结算，开始后可用“立即结算”推进回合。';
+                    : '当前为手动结算，所有玩家点击“结束回合”后才会结算。';
             } else if (isHost && gameStarted) {
                 hint.textContent = '对局进行中，结算模式已锁定。';
             } else {
                 hint.textContent = settings.autoResolve
                     ? `本局由房主自动结算，倒计时 ${Math.round(settings.roundTimeMs / 1000)} 秒。`
-                    : '本局由房主手动结算。';
+                    : '本局为手动结算，需要所有玩家结束回合。';
             }
         }
     }

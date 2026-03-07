@@ -14,6 +14,10 @@ const io = new Server(server, {
   }
 });
 
+app.get('/health', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 let rooms = {};
 
 const DISCONNECT_GRACE_MS = 12000;
@@ -63,6 +67,66 @@ function emitRoomState(roomId) {
   io.to(roomId).emit('roomState', getRoomState(roomId));
 }
 
+function clearRoundTimer(room) {
+  if (room?.roundTimer) {
+    clearTimeout(room.roundTimer);
+    room.roundTimer = null;
+  }
+}
+
+function getActiveReadyPlayerIds(room) {
+  return (room?.players || [])
+    .filter(player => !player.isBot && player.disconnected !== true)
+    .map(player => player.id);
+}
+
+function beginRound(roomId, roundNumber) {
+  const room = rooms[roomId];
+  if (!room || !room.game) return;
+
+  clearRoundTimer(room);
+  room.game.round = roundNumber;
+  room.game.phase = 'selecting';
+  room.game.readyByPlayerId = {};
+
+  const resolveAt = room.settings.autoResolve ? Date.now() + room.settings.roundTimeMs : null;
+  room.game.resolveAt = resolveAt;
+
+  if (room.settings.autoResolve && resolveAt) {
+    room.roundTimer = setTimeout(() => {
+      const latestRoom = rooms[roomId];
+      if (!latestRoom?.game || latestRoom.game.phase !== 'selecting') return;
+      latestRoom.game.phase = 'resolving';
+      latestRoom.game.resolveAt = null;
+      latestRoom.roundTimer = null;
+      io.to(roomId).emit('roundResolveRequested', { round: latestRoom.game.round, reason: 'timer' });
+    }, room.settings.roundTimeMs);
+  }
+
+  io.to(roomId).emit('roundStarted', {
+    round: roundNumber,
+    autoResolve: !!room.settings.autoResolve,
+    roundTimeMs: room.settings.roundTimeMs,
+    resolveAt,
+  });
+}
+
+function maybeResolveManualRound(roomId) {
+  const room = rooms[roomId];
+  if (!room?.game || room.game.phase !== 'selecting' || room.settings.autoResolve) return;
+
+  const playerIds = getActiveReadyPlayerIds(room);
+  if (!playerIds.length) return;
+
+  const allReady = playerIds.every(playerId => room.game.readyByPlayerId?.[playerId]);
+  if (!allReady) return;
+
+  room.game.phase = 'resolving';
+  room.game.resolveAt = null;
+  clearRoundTimer(room);
+  io.to(roomId).emit('roundResolveRequested', { round: room.game.round, reason: 'all-ready' });
+}
+
 function clearDisconnectTimer(room, playerKey) {
   const timer = room?.disconnectTimers?.[playerKey];
   if (timer) {
@@ -81,11 +145,13 @@ function removePlayerFromRoom(roomId, playerId, reason = 'Player left room') {
   if (removed?.playerKey) clearDisconnectTimer(room, removed.playerKey);
 
   if (room.players.length === 0) {
+    clearRoundTimer(room);
     delete rooms[roomId];
     return;
   }
 
   if (room.game && room.players.length < 2) {
+    clearRoundTimer(room);
     room.game = null;
     room.lastState = null;
     io.to(roomId).emit('gameEnded', reason);
@@ -133,6 +199,7 @@ io.on('connection', (socket) => {
       gameInstance: game,
       lastState: null,
       settings: { ...DEFAULT_ROOM_SETTINGS },
+      roundTimer: null,
       disconnectTimers: {},
     };
 
@@ -175,7 +242,19 @@ io.on('connection', (socket) => {
       existing.name = payload.name || existing.name;
       existing.disconnected = false;
       emitRoomState(roomId);
-      if (room.game) socket.emit('gameStarted', getRoomState(roomId));
+      if (room.game) {
+        socket.emit('gameStarted', getRoomState(roomId));
+        if (room.game.phase === 'selecting') {
+          socket.emit('roundStarted', {
+            round: room.game.round,
+            autoResolve: !!room.settings.autoResolve,
+            roundTimeMs: room.settings.roundTimeMs,
+            resolveAt: room.game.resolveAt,
+          });
+        } else if (room.game.phase === 'resolving') {
+          socket.emit('roundResolveRequested', { round: room.game.round, reason: 'sync' });
+        }
+      }
       if (room.lastState) socket.emit('roundResolved', room.lastState);
       return;
     }
@@ -189,6 +268,16 @@ io.on('connection', (socket) => {
       emitRoomState(roomId);
       if (room.game && room.lastState) {
         socket.emit('gameStarted', getRoomState(roomId));
+        if (room.game.phase === 'selecting') {
+          socket.emit('roundStarted', {
+            round: room.game.round,
+            autoResolve: !!room.settings.autoResolve,
+            roundTimeMs: room.settings.roundTimeMs,
+            resolveAt: room.game.resolveAt,
+          });
+        } else if (room.game.phase === 'resolving') {
+          socket.emit('roundResolveRequested', { round: room.game.round, reason: 'sync' });
+        }
         socket.emit('roundResolved', room.lastState);
       }
     }
@@ -225,9 +314,10 @@ io.on('connection', (socket) => {
 
     if (room.game) return;
     room.settings = normalizeRoomSettings(settings || room.settings);
-    room.game = { started: true };
+    room.game = { started: true, round: 1, phase: 'selecting', resolveAt: null, readyByPlayerId: {} };
     room.lastState = null;
     io.to(roomId).emit('gameStarted', getRoomState(roomId));
+    beginRound(roomId, 1);
     emitRoomState(roomId);
   });
 
@@ -272,43 +362,41 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('actionSelected', { playerId: socket.id, actionKey, targetId });
   });
 
+  socket.on('setRoundReady', (roomId, ready) => {
+    const room = rooms[roomId];
+    if (!room || !room.players.some(player => player.id === socket.id)) return;
+    if (!room.game || room.game.phase !== 'selecting') return;
+    room.game.readyByPlayerId[socket.id] = !!ready;
+    io.to(roomId).emit('roundReadyChanged', { playerId: socket.id, ready: !!ready });
+    maybeResolveManualRound(roomId);
+  });
+
   // Host sends the resolved state
   socket.on('roundResolved', (roomId, state) => {
     const room = rooms[roomId];
     if (!room) return;
-    // console.log(`[roundResolved] room=${roomId} by host=${socket.id} round=${state?.round}`);
-    // Broadcast to others
+    clearRoundTimer(room);
     room.lastState = state || null;
     io.to(roomId).emit('roundResolved', state || {});
 
     const nextState = state?.state || state?.gameState;
     if (nextState === 'ended') {
+      room.game.phase = 'ended';
+      room.game.resolveAt = null;
       room.game = null;
       emitRoomState(roomId);
+      return;
     }
 
-    // Update server-side state cache if needed (omitted for now as we rely on host)
-  });
-
-  socket.on('requestRematch', (roomId) => {
-    console.info('Rematch requested in room', roomId);
-    const room = rooms[roomId];
-    if (room) {
-      // 重置房间游戏状态
-      room.game = null;
-      room.lastState = null;
-      // 重置所有玩家状态
-      room.players.forEach(p => {
-        p.ready = p.isBot ? true : false;
-        // 重置游戏内属性（如果需要同步给客户端）
-        p.health = 1; // 初始血量
-        p.energy = 0; // 初始气量
-        p.isAlive = true;
-      });
-
-      // 通知房间内所有玩家回到准备状态
-      io.to(roomId).emit('rematchStarted');
+    if (nextState === 'selecting' && typeof state?.round === 'number') {
+      if (!room.game) {
+        room.game = { started: true, round: state.round, phase: 'selecting', resolveAt: null, readyByPlayerId: {} };
+      }
+      beginRound(roomId, state.round);
       emitRoomState(roomId);
+    } else if (room.game) {
+      room.game.phase = nextState || room.game.phase;
+      room.game.resolveAt = null;
     }
   });
 

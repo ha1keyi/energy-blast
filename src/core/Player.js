@@ -12,6 +12,7 @@ export class Player {
         this.energy = energy;
         this.currentAction = null;
         this.target = null;
+        this.roundReady = false;
         this.isAlive = true;
         this.score = 0;
         // 预留：虚拟玩家与AI控制支持
@@ -69,6 +70,7 @@ export class Player {
         );
 
         this.target = target;
+        this.roundReady = false;
 
         return true;
     }
@@ -105,12 +107,14 @@ export class Player {
     resetRound() {
         this.currentAction = null;
         this.target = null;
+        this.roundReady = false;
     }
 
     // 开局/新回合重置（与 resetRound 类似，预留将来扩展）
     resetForNewRound() {
         this.currentAction = null;
         this.target = null;
+        this.roundReady = false;
     }
 
     // 回合结束时的气量调整
@@ -128,6 +132,7 @@ export class Player {
             energy: this.energy,
             isAlive: this.isAlive,
             isBot: !!this.isBot,
+            roundReady: !!this.roundReady,
             currentAction: this.currentAction ? this.currentAction.name : '无',
             target: this.target ? this.target.name : '无'
         };

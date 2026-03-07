@@ -92,6 +92,16 @@ body.app-ready #ui-layer {
   pointer-events: auto;
 }
 
+#ui-layer input,
+#ui-layer select,
+#ui-layer textarea,
+#ui-layer label,
+#ui-layer option,
+#ui-layer .match-settings-inline,
+#ui-layer .join-room-form {
+  pointer-events: auto;
+}
+
 .hidden {
   display: none !important;
 }
@@ -329,6 +339,33 @@ button:active {
 .action-bar-status {
   font-size: 14px;
   line-height: 1.45;
+}
+
+.action-bar-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  max-width: 640px;
+  flex-wrap: wrap;
+}
+
+.action-ready-summary {
+  font-size: 13px;
+  color: #444;
+}
+
+.action-round-btn {
+  min-width: 144px;
+}
+
+.action-round-btn.done,
+.action-round-btn:disabled {
+  background: #ddd;
+  color: #666;
+  box-shadow: 2px 2px 0 #999;
+  cursor: not-allowed;
 }
 
 .action-btn {

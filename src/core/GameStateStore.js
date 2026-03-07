@@ -24,12 +24,17 @@ export class GameStateStore {
     if (Array.isArray(partial.logs)) next.logs = partial.logs.slice();
     if (Array.isArray(partial.players)) next.players = partial.players.map(p => ({ ...p }));
 
+    const prevLogsSignature = JSON.stringify(Array.isArray(prev.logs) ? prev.logs : []);
+    const nextLogsSignature = JSON.stringify(Array.isArray(next.logs) ? next.logs : []);
+    const prevPlayersSignature = JSON.stringify(Array.isArray(prev.players) ? prev.players : []);
+    const nextPlayersSignature = JSON.stringify(Array.isArray(next.players) ? next.players : []);
+
     const changed = (
       prev.round !== next.round ||
       prev.state !== next.state ||
       prev.isRunning !== next.isRunning ||
-      (Array.isArray(next.logs) && (!Array.isArray(prev.logs) || prev.logs.length !== next.logs.length)) ||
-      (Array.isArray(next.players) && (!Array.isArray(prev.players) || prev.players.length !== next.players.length))
+      prevLogsSignature !== nextLogsSignature ||
+      prevPlayersSignature !== nextPlayersSignature
     );
 
     if (!changed) return;
@@ -70,6 +75,7 @@ export class GameStateStore {
   applySnapshot(snap) {
     if (!snap || typeof snap !== 'object' || !this.game) return;
     const core = this.game;
+    const prevRound = core.currentRound;
     if (snap.matchSettings && typeof snap.matchSettings === 'object') {
       core.applyMatchSettings?.(snap.matchSettings, { reschedule: false });
     }
@@ -79,8 +85,15 @@ export class GameStateStore {
     if (typeof nextState === 'string') core.gameState = nextState;
     if (typeof snap.isRunning === 'boolean') core.isRunning = snap.isRunning;
     else if (typeof nextState === 'string') core.isRunning = nextState === 'selecting' || nextState === 'resolving';
-    if (typeof snap.nextResolveAt === 'number' && Number.isFinite(snap.nextResolveAt)) core.nextResolveAt = snap.nextResolveAt;
-    else if (core.gameState !== 'selecting') core.nextResolveAt = null;
+    const isHost = !!(typeof window !== 'undefined' && window.lobby?.isHost?.());
+    const useServerDisplayTimer = !!(typeof window !== 'undefined' && window.lobby?.connected && window.lobby?.roomId && !String(window.lobby.roomId).startsWith('local-'));
+    if (typeof snap.nextResolveAt === 'number' && Number.isFinite(snap.nextResolveAt) && !(useServerDisplayTimer && core.gameState === 'selecting')) {
+      if (!isHost && core.gameState === 'selecting' && typeof core.nextResolveAt === 'number' && prevRound === snap.round) {
+        core.nextResolveAt = Math.min(core.nextResolveAt, snap.nextResolveAt);
+      } else {
+        core.nextResolveAt = snap.nextResolveAt;
+      }
+    } else if (core.gameState !== 'selecting') core.nextResolveAt = null;
     if (Array.isArray(snap.logs)) core.logs = snap.logs.slice();
 
     // Players by name preferred (fallback to id)
@@ -107,6 +120,7 @@ export class GameStateStore {
             if (typeof sp.energy === 'number') lp.energy = sp.energy;
             if (typeof sp.isAlive === 'boolean') lp.isAlive = sp.isAlive;
             lp.isBot = !!sp.isBot;
+            lp.roundReady = !!sp.roundReady;
 
             // Keep action details for remote animation rendering.
             if (sp.currentAction && typeof sp.currentAction === 'object') {

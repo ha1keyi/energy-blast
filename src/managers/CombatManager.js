@@ -14,6 +14,10 @@ export class CombatManager {
   async processRound() {
     const core = this.game;
     if (!core || !core.isRunning) return;
+    if (core.gameState === 'resolving') return;
+
+    const lifecycleVersion = core.lifecycleVersion;
+    core.clearResolveTimer();
 
     // Transition to resolving
     core.gameState = 'resolving';
@@ -74,18 +78,16 @@ export class CombatManager {
     // If this round can end the game, keep resolving visuals visible for a short beat.
     const willEnd = core.getAlivePlayers().length <= 1;
     if (willEnd) {
-      await new Promise(resolve => {
-        setTimeout(resolve, this.resolveDisplayMs);
-      });
+      const isStillValid = await core.wait(this.resolveDisplayMs, lifecycleVersion);
+      if (!isStillValid) return;
       core.checkGameEnd();
       core.store?.updateState(core.getGameState());
       return;
     }
 
     // Keep resolving state visible to ensure animation managers can render effects.
-    await new Promise(resolve => {
-      setTimeout(resolve, this.resolveDisplayMs);
-    });
+    const isStillValid = await core.wait(this.resolveDisplayMs, lifecycleVersion);
+    if (!isStillValid || !core.isRunning || core.gameState !== 'resolving') return;
 
     players.forEach(p => {
       p.resetRound?.();
