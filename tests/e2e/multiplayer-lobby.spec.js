@@ -54,6 +54,24 @@ async function expectAutoCountdownReady(page) {
     await expect(page.locator('#action-finish-round-btn')).toHaveCount(0);
 }
 
+async function selectAttackTarget(page, targetName) {
+    await page.getByRole('button', { name: /小波/ }).click();
+    await expect(page.locator('#action-bar-status')).toContainText('待选目标');
+    await page.evaluate((name) => {
+        const target = window.game?.players?.find((player) => player.name === name);
+        if (!target) throw new Error(`Target not found: ${name}`);
+        if (!window.battleFlow?.onTargetChosen) throw new Error('battleFlow.onTargetChosen unavailable');
+        window.battleFlow.onTargetChosen({ id: target.id });
+    }, targetName);
+    await expect(page.locator('#action-bar-status')).toContainText(targetName);
+}
+
+async function waitForLobbyReturn(page) {
+    await expect(page.locator('#lobby-screen')).toBeVisible({ timeout: 12_000 });
+    await expect(page.locator('#home-screen')).toHaveClass(/hidden/);
+    await expect(page.locator('#action-bar')).toHaveClass(/hidden/);
+}
+
 test('host and guest can join the same lobby and become ready', async ({ browser }) => {
     const hostContext = await browser.newContext();
     const guestContext = await browser.newContext();
@@ -130,6 +148,47 @@ test('auto mode shows countdown on both players and advances to the next round',
     await expectRoundHeader(guestPage, 2);
     await expectAutoCountdownReady(hostPage);
     await expectAutoCountdownReady(guestPage);
+
+    await hostContext.close();
+    await guestContext.close();
+});
+
+test('manual attack flow ends the match and returns both players to the lobby', async ({ browser }, testInfo) => {
+    const hostContext = await browser.newContext();
+    const guestContext = await browser.newContext();
+    const hostPage = await hostContext.newPage();
+    const guestPage = await guestContext.newPage();
+
+    const roomId = await createRoom(hostPage, 'Host');
+    await hostPage.locator('#lobby-auto-resolve-select').selectOption('manual');
+    await joinRoomByUrl(guestPage, roomId, 'Guest');
+
+    await readyBothPlayers(hostPage, guestPage);
+    await startMatch(hostPage);
+    await expect(guestPage.locator('#action-bar')).toBeVisible({ timeout: 20_000 });
+
+    await hostPage.locator('#action-finish-round-btn').click();
+    await guestPage.locator('#action-finish-round-btn').click();
+    await expectRoundHeader(hostPage, 2);
+    await expectRoundHeader(guestPage, 2);
+    await expect(hostPage.locator('#action-bar-status')).toContainText('气 1', { timeout: 10_000 });
+    await expect(guestPage.locator('#action-bar-status')).toContainText('气 1', { timeout: 10_000 });
+
+    await selectAttackTarget(hostPage, 'Guest');
+    await hostPage.locator('#action-finish-round-btn').click();
+    await guestPage.locator('#action-finish-round-btn').click();
+
+    await expect.poll(async () => hostPage.evaluate(() => window.game?.gameState), { timeout: 10_000 }).toBe('ended');
+    await expect.poll(async () => guestPage.evaluate(() => window.game?.gameState), { timeout: 10_000 }).toBe('ended');
+
+    await hostPage.screenshot({ path: testInfo.outputPath('manual-end-host.png'), fullPage: true });
+    await guestPage.screenshot({ path: testInfo.outputPath('manual-end-guest.png'), fullPage: true });
+
+    await waitForLobbyReturn(hostPage);
+    await waitForLobbyReturn(guestPage);
+    await expect(hostPage.locator('#start-game-btn-active')).toBeVisible({ timeout: 10_000 });
+    await expect(hostPage.locator('#lobby-status')).toContainText('所有玩家已准备', { timeout: 10_000 });
+    await expect(guestPage.locator('#lobby-status')).toContainText('等待房主开始游戏', { timeout: 10_000 });
 
     await hostContext.close();
     await guestContext.close();
