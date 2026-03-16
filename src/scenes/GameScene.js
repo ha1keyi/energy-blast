@@ -27,10 +27,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     create() {
-        const viewportWidth = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, 1);
-        const viewportHeight = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, 1);
+        const viewport = window.viewportManager?.snapshot?.() || {
+            width: Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, 1),
+            height: Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, 1),
+        };
+        const viewportWidth = viewport.width;
+        const viewportHeight = viewport.height;
         this.scale.resize(viewportWidth, viewportHeight);
         this.cameras.resize(viewportWidth, viewportHeight);
+        this.cameras.main.roundPixels = true;
 
         // Hand-drawn black/white scene frame
         const { width, height } = this.scale;

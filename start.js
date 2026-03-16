@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { networkInterfaces } from 'os';
 import fs from 'fs';
+import net from 'net';
 
 // 获取本机IP地址
 function getLocalIP() {
@@ -34,11 +35,8 @@ const server = spawn('npm', ['start'], {
 });
 
 // --- Step 2: Start ngrok ---
-console.info('Starting ngrok (if available)');
-const ngrok = spawn('ngrok', ['start', '--config', 'ngrok.yml', '--all'], {
-    shell: true,
-    stdio: 'ignore' // We'll get URLs via API
-});
+// We'll start ngrok after the client so the tunnel maps the actual client port.
+let ngrok;
 
 // --- Step 3: Wait for ngrok URLs and start Client ---
 // async function getNgrokUrls(retries = 10) {
@@ -72,6 +70,49 @@ async function getNgrokUrl(retries = 10) {
     return null;
 }
 
+function isPortFree(port, host = '127.0.0.1') {
+    return new Promise((resolve) => {
+        const socket = new net.Socket();
+        let settled = false;
+        socket.setTimeout(250);
+
+        socket.once('connect', () => {
+            settled = true;
+            socket.destroy();
+            resolve(false); // something is listening -> not free
+        });
+
+        socket.once('timeout', () => {
+            if (!settled) {
+                settled = true;
+                socket.destroy();
+                resolve(true);
+            }
+        });
+
+        socket.once('error', () => {
+            if (!settled) {
+                settled = true;
+                socket.destroy();
+                resolve(true); // connection refused -> port free
+            }
+        });
+
+        socket.connect(port, host);
+    });
+}
+
+async function findAvailablePort(startPort, maxAttempts = 200) {
+    let port = Number(startPort) || 5173;
+    for (let i = 0; i < maxAttempts; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await isPortFree(port);
+        if (ok) return port;
+        port += 1;
+    }
+    return null;
+}
+
 (async () => {
     // const urls = await getNgrokUrls();
 
@@ -89,21 +130,38 @@ async function getNgrokUrl(retries = 10) {
     //     fs.writeFileSync('.env.local', `VITE_SERVER_URL=http://${localIP}:3000\n`);
     // }
 
+    const requestedPort = process.env.CLIENT_PORT || process.argv[2] || '5173';
+    const clientPort = (await findAvailablePort(requestedPort)) || Number(requestedPort) || 5173;
+
+    console.info(`Local: http://localhost:${clientPort}`);
+    console.info('Starting Vite dev server for client');
+    const client = spawn('npm', ['run', 'dev', '--', '--host', '0.0.0.0', '--port', String(clientPort)], {
+        cwd: process.cwd(),
+        shell: true,
+        stdio: 'inherit'
+    });
+
+    // Start ngrok and point it at the client port so public URL maps correctly
+    try {
+        console.info('Starting ngrok (if available) for frontend tunnel');
+        ngrok = spawn('ngrok', ['http', String(clientPort)], {
+            shell: true,
+            stdio: 'ignore'
+        });
+    } catch (e) {
+        console.warn('ngrok not available or failed to start:', e.message || e);
+        ngrok = null;
+    }
+
     const frontendUrl = await getNgrokUrl();
     if (frontendUrl) {
-        console.info(`Public URL: ${frontendUrl || 'n/a'}`);
+        console.info(`Public URL: ${frontendUrl}`);
         fs.writeFileSync('.env.local', 'VITE_SERVER_URL=\n');
     } else {
         fs.writeFileSync('.env.local', 'VITE_SERVER_URL=\n');
     }
 
-    console.info(`Frontend public: ${frontendUrl || 'n/a'} — local: http://localhost:5173`);
-    console.info('Starting Vite dev server for client');
-    const client = spawn('npm', ['run', 'dev', '--', '--host', '0.0.0.0'], {
-        cwd: process.cwd(),
-        shell: true,
-        stdio: 'inherit'
-    });
+    console.info(`Frontend public: ${frontendUrl || 'n/a'} — local: http://localhost:${clientPort}`);
 
     const cleanup = () => {
         console.info('Stopping child processes...');

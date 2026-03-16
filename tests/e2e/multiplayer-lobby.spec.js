@@ -152,6 +152,38 @@ async function finishRoundForBoth(hostPage, guestPage) {
     await guestPage.locator('#action-finish-round-btn').click();
 }
 
+async function expectRenderQualityDiagnostics(page) {
+    const diagnostics = await page.evaluate(() => {
+        const canvas = document.querySelector('#game-canvas canvas');
+        const rect = canvas?.getBoundingClientRect?.();
+        const info = window.renderDiagnostics || {};
+        return {
+            profile: info.profile || '',
+            hasWebGL: !!info.hasWebGL,
+            dpr: Number(info.dpr || 1),
+            viewportWidth: Math.round(info.viewport?.width || 0),
+            viewportHeight: Math.round(info.viewport?.height || 0),
+            backingWidth: Math.round(canvas?.width || 0),
+            backingHeight: Math.round(canvas?.height || 0),
+            cssWidth: Math.round(rect?.width || 0),
+            cssHeight: Math.round(rect?.height || 0),
+        };
+    });
+
+    expect(diagnostics.profile).not.toBe('');
+    expect(diagnostics.viewportWidth).toBeGreaterThan(0);
+    expect(diagnostics.viewportHeight).toBeGreaterThan(0);
+    expect(diagnostics.cssWidth).toBeGreaterThan(0);
+    expect(diagnostics.cssHeight).toBeGreaterThan(0);
+    expect(diagnostics.backingWidth).toBeGreaterThanOrEqual(diagnostics.cssWidth);
+    expect(diagnostics.backingHeight).toBeGreaterThanOrEqual(diagnostics.cssHeight);
+}
+
+test('render quality diagnostics are exposed and consistent', async ({ page }) => {
+    await waitForApp(page);
+    await expectRenderQualityDiagnostics(page);
+});
+
 test('host and guest can join the same lobby and become ready', async ({ browser }) => {
     const hostContext = await browser.newContext();
     const guestContext = await browser.newContext();

@@ -7,6 +7,7 @@ export class BattleFlowCoordinator {
     constructor({
         gameCore,
         phaserGame,
+        viewportManager,
         lobbyManager,
         debugUI,
         elements,
@@ -16,6 +17,7 @@ export class BattleFlowCoordinator {
     }) {
         this.gameCore = gameCore;
         this.phaserGame = phaserGame;
+        this.viewportManager = viewportManager;
         this.lobbyManager = lobbyManager;
         this.debugUI = debugUI;
         this.elements = elements;
@@ -33,14 +35,8 @@ export class BattleFlowCoordinator {
     }
 
     refreshGameViewport() {
-        const width = Math.max(window.innerWidth || 0, document.documentElement?.clientWidth || 0, 1);
-        const height = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0, 1);
-        const scaleManager = this.phaserGame?.scale;
-        const scene = this.phaserGame?.scene?.keys?.GameScene;
-
-        scaleManager?.resize?.(width, height);
-        scene?.scale?.resize?.(width, height);
-        scene?.cameras?.resize?.(width, height);
+        this.viewportManager?.refresh?.();
+        this.viewportManager?.applyToGame?.(this.phaserGame);
     }
 
     showGameCanvas() {

@@ -5,6 +5,8 @@ import { DebugUIManager } from './managers/DebugUIManager.js';
 import { LobbyManager } from './managers/LobbyManager.js';
 import { LobbyFlowCoordinator } from './managers/LobbyFlowCoordinator.js';
 import { BattleFlowCoordinator } from './managers/BattleFlowCoordinator.js';
+import { buildRenderProfile, getRenderDiagnostics } from './render/RenderProfile.js';
+import { ViewportManager } from './render/ViewportManager.js';
 import './style.css';
 
 if (typeof window !== 'undefined') {
@@ -24,14 +26,17 @@ if (import.meta.env && import.meta.env.DEV) {
 window.game = gameCore;
 window.lobby = LobbyManager;
 
-const DPR = Math.max(1, window.devicePixelRatio || 1);
+const renderProfile = buildRenderProfile();
+const viewportManager = new ViewportManager({ dpr: renderProfile.dpr });
+window.viewportManager = viewportManager;
+
 const config = {
-  type: Phaser.CANVAS,
+  type: renderProfile.phaserType,
   parent: 'game-canvas',
   transparent: true,
   backgroundColor: '#00000000',
-  resolution: DPR,
-  render: { antialias: true, pixelArt: false, roundPixels: false },
+  resolution: renderProfile.dpr,
+  render: renderProfile.render,
   scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: 'arcade', arcade: { gravity: { y: 0 }, debug: false } },
 };
@@ -39,6 +44,18 @@ const config = {
 const phaserGame = new Phaser.Game(config);
 window.phaserGame = phaserGame;
 phaserGame.scene.add('GameScene', GameScene, false);
+viewportManager.applyToGame(phaserGame);
+viewportManager.bindWindowResize(() => viewportManager.applyToGame(phaserGame));
+
+window.renderDiagnostics = {
+  ...getRenderDiagnostics(renderProfile),
+  rendererType: phaserGame.renderer?.type || null,
+  viewport: viewportManager.snapshot(),
+};
+viewportManager.subscribe((snapshot) => {
+  if (!window.renderDiagnostics) return;
+  window.renderDiagnostics.viewport = snapshot;
+});
 
 const elements = {
   homeScreen: document.getElementById('home-screen'),
@@ -217,6 +234,7 @@ const lobbyCoordinator = new LobbyFlowCoordinator({
 const battleCoordinator = new BattleFlowCoordinator({
   gameCore,
   phaserGame,
+  viewportManager,
   lobbyManager: LobbyManager,
   debugUI,
   elements,

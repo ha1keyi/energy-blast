@@ -94,7 +94,7 @@ export class BattleAnimationManager {
       const key = this.getActionImageKey(player.currentAction);
       if (!key) return;
 
-      const sprite = this.trackNode(this.scene.add.image(position.x, position.y, key)
+      const sprite = this.trackNode(this.scene.add.image(Math.round(position.x), Math.round(position.y), key)
         .setDisplaySize(84, 84)
         .setDepth(22)
         .setOrigin(0.5));
@@ -108,10 +108,10 @@ export class BattleAnimationManager {
       const key = this.getActionImageKey(self.currentAction);
       if (key) {
         const { width } = this.scene.scale;
-        const selfSize = Math.max(112, Math.min(width * 0.24, 220));
+        const selfSize = Math.round(Math.max(112, Math.min(width * 0.24, 220)));
         const selfPosition = this.layout.getSelfActionPosition(selfSize);
-        const sx = selfPosition.x;
-        const sy = selfPosition.y;
+        const sx = Math.round(selfPosition.x);
+        const sy = Math.round(selfPosition.y);
         const sprite = this.trackNode(this.scene.add.image(sx, sy, key)
           .setDisplaySize(selfSize, selfSize)
           .setDepth(23)
