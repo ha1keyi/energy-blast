@@ -1,104 +1,34 @@
-# Energy Blast - Project Status Report
+# Energy Blast
 
-## 1. Project Status
-- **Tech Stack**: 
-  - Frontend: Phaser 3 + Vite + Socket.io-client (ES Modules)
-  - Backend: Node.js + Express + Socket.io (Converted to ES Modules)
-- **Health**: 
-  - Core gameplay loop is functional.
-  - Critical bugs (Charge logic, UI overlap) have been fixed.
-  - Structure optimized for code sharing between client and server.
-- **Dependencies**:
-  - `phaser`: ^3.90.0 (Up to date)
-  - `socket.io`: ^4.8.1 (Up to date)
-  - `vite`: ^7.1.2 (Up to date)
+简单介绍
+- `Energy Blast` 是一个基于浏览器的多人策略对战小游戏，客户端使用 Phaser + Vite，使用 Socket.IO 进行多人通信。该仓库包含前端代码和一个可选的 Node.js 后端（位于 `server/`）。
 
-## 2. Startup Instructions
+快速启动
 
-### Prerequisites
-- Node.js installed (v16+ recommended).
-- Dependencies installed in both root and `server/`.
+1. 安装依赖（根目录）：
 
-### Installation
 ```bash
-# Root dependencies
 npm install
+```
 
-# Server dependencies
+2. 启动开发服务器（客户端）：
+
+```bash
+npm run dev
+```
+
+3. 启动后端（可选）：
+
+```bash
 cd server
 npm install
-cd ..
+npm start
 ```
 
-### Start Game (One-click)
-```bash
-node start.js
-```
-This will start both the backend server (port 3000) and the frontend dev server (usually port 5173).
+（仓库中也包含 `start.js` 脚本，可用于同时启动前后端：`node start.js`）
 
-### Manual Startup
-1. **Server**:
-   ```bash
-   cd server
-   npm start
-   ```
-2. **Client**:
-   ```bash
-   npm run dev
-   ```
+更多信息
+- 若需运行 E2E 测试：`npm run test:e2e`。
+- 若想构建发布包：`npm run build`。
 
-## 3. Fixes & Optimizations
-
-### 1) UI Overlap
-- **Issue**: Player interface obscured Battle Log.
-- **Fix**: Moved Battle Log panel upwards (`y = height - panelHeight - 160`) to prevent overlap with the Player HUD.
-
-### 2) Charge Action Logic
-- **Issue**: Selecting "Store Energy" (储气) did not increase Qi.
-- **Fix**: Updated `Player.adjustEnergy()` to correctly add `energyGain` from the action.
-
-### 3) Text Consistency
-- **Issue**: "Energy" displayed instead of "Qi".
-- **Fix**: Verified UI text uses "气" (Qi).
-
-### 4) Debug Panel
-- **Issue**: Hide button invalid; needed better control.
-- **Fix**: 
-  - Removed "Hide" button.
-  - Added `Ctrl+Shift+D` shortcut to toggle visibility.
-  - Added `window.toggleDebugPanel()` console command.
-  - Added **Adjust Player Stats** controls (ID, Health/Qi, Value) to the panel.
-
-### 5) Structure Optimization
-- **Optimization**: 
-  - Converted Server to ES Modules (`"type": "module"`).
-  - Refactored `Game.js` to remove circular dependency with `DebugUIManager`.
-  - Enabled sharing of core logic (`Player.js`, `Game.js`) between Client and Server.
-
-## 4. Debugging
-- **Toggle Panel**: Press `Ctrl+Shift+D` or type `window.toggleDebugPanel()` in console.
-- **Adjust Stats**: Enter Player ID (check console or assume 1/2), select property, enter value, and click "Set".
-
-## 5. Verification Checklist
-
-| Issue | Status | Verification Method |
-| :--- | :--- | :--- |
-| **UI Overlap** | ✅ Fixed | Check that Battle Log appears above the Player HUD area. |
-| **Charge Logic** | ✅ Fixed | Select "Store Energy" -> Confirm Qi increases by 1. |
-| **Text** | ✅ Fixed | Check HUD displays "气" instead of "Energy". |
-| **Debug Panel** | ✅ Fixed | Press `Ctrl+Shift+D` to toggle. Use inputs to change HP/Qi. |
-| **Startup** | ✅ Done | Run `node start.js` to launch everything. |
-
-## 6. Files Modified
-*   `src/core/Player.js`: Fixed energy calculation logic.
-*   `src/scenes/GameScene.js`: Adjusted UI layout.
-*   `index.html`: Updated Debug Panel HTML.
-*   `src/managers/DebugUIManager.js`: Implemented new debug controls.
-*   `server/server.js`: Converted to ESM and updated imports.
-*   `server/package.json`: Enabled ES Modules.
-*   `src/core/Game.js`: Refactored for shared use.
-*   `start.js`: Created startup script.
-*   `README.md`: Added project documentation.
-
-## 7. Next Steps
-The project is now ready for development and testing. All critical bugs have been fixed and the codebase has been optimized for better maintainability and code sharing between client and server.
+如果需要我把 README 翻译成英文或补充开发者文档，请告诉我。

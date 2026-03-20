@@ -98,6 +98,216 @@ body.app-ready #ui-layer {
   pointer-events: auto;
 }
 
+#battle-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+}
+
+#battle-hud,
+#battle-log-panel,
+#battle-end-screen {
+  position: absolute;
+  inset: 0;
+}
+
+#battle-pending-hint {
+  position: absolute;
+  padding: 10px 16px;
+  border: 3px solid #222;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 4px 4px 0 #222;
+  color: #111;
+  font-size: 16px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.battle-card,
+.battle-log-shell,
+.battle-end-card {
+  background: rgba(255, 255, 255, 0.96);
+  border: 3px solid #222;
+  box-shadow: 6px 6px 0 #222;
+}
+
+.battle-opponent-card,
+.battle-self-card,
+.battle-round-state,
+.battle-log-shell,
+.battle-end-card,
+.battle-end-overlay,
+.battle-end-action {
+  position: absolute;
+}
+
+.battle-opponent-card,
+.battle-self-card,
+.battle-end-action {
+  pointer-events: auto;
+}
+
+.battle-opponent-card {
+  width: 160px;
+  padding: 10px 12px;
+  border-radius: 16px 22px 14px 18px;
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+
+.battle-opponent-card:hover {
+  background: #fafafa;
+  transform: translate(2px, 2px);
+  box-shadow: 4px 4px 0 #222;
+}
+
+.battle-opponent-card.align-center {
+  transform: translateX(-50%);
+}
+
+.battle-opponent-card.align-right {
+  transform: translateX(-100%);
+}
+
+.battle-opponent-card.align-center:hover {
+  transform: translate(-50%, 2px);
+}
+
+.battle-opponent-card.align-right:hover {
+  transform: translate(-100%, 2px);
+}
+
+.battle-card-title {
+  font-size: 16px;
+  color: #111;
+}
+
+.battle-card-stats {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  color: #222;
+}
+
+.battle-card-stats .danger {
+  color: #d94841;
+}
+
+.battle-self-card {
+  min-width: 220px;
+  max-width: 280px;
+  padding: 14px 18px;
+  border-radius: 18px 24px 16px 20px;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.battle-self-meta {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 15px;
+}
+
+.battle-round-state {
+  padding: 8px 14px;
+  border-radius: 999px;
+  transform: translate(-50%, -100%);
+  color: #111;
+  font-size: 15px;
+}
+
+.battle-log-shell {
+  padding: 10px 12px 12px;
+  border-radius: 18px 26px 14px 18px;
+  overflow: hidden;
+}
+
+.battle-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.battle-log-title {
+  font-size: 16px;
+  color: #111;
+}
+
+.battle-log-state {
+  font-size: 12px;
+  color: #666;
+}
+
+.battle-log-empty,
+.battle-log-row {
+  padding: 6px 8px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #111;
+}
+
+.battle-log-empty {
+  color: #666;
+}
+
+.battle-log-row + .battle-log-row {
+  margin-top: 6px;
+}
+
+.battle-log-row.alt {
+  background: #f7f7f7;
+}
+
+.battle-end-overlay {
+  inset: 0;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.battle-end-card {
+  padding: 28px 24px;
+  border-radius: 24px 34px 20px 30px;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  min-width: 280px;
+}
+
+.battle-end-title {
+  font-size: 36px;
+  color: #111;
+}
+
+.battle-end-result {
+  margin-top: 18px;
+  font-size: 22px;
+  color: #111;
+}
+
+.battle-end-hint {
+  margin-top: 14px;
+  font-size: 16px;
+  color: #666;
+}
+
+.battle-end-action {
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  min-width: 180px;
+}
+
+.battle-end-action:hover,
+.battle-end-action:active {
+  transform: translateX(-50%);
+}
+
 #ui-layer input,
 #ui-layer select,
 #ui-layer textarea,
@@ -559,5 +769,60 @@ button:active {
 
   .loading-card h1 {
     font-size: 2.25rem;
+  }
+
+  #battle-pending-hint {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  .battle-opponent-card {
+    width: 132px;
+    padding: 8px 10px;
+  }
+
+  .battle-card-title {
+    font-size: 14px;
+  }
+
+  .battle-card-stats,
+  .battle-self-meta,
+  .battle-log-row,
+  .battle-log-empty {
+    font-size: 12px;
+  }
+
+  .battle-self-card {
+    min-width: 192px;
+    padding: 12px 14px;
+  }
+
+  .battle-round-state {
+    font-size: 13px;
+  }
+
+  .battle-log-title {
+    font-size: 14px;
+  }
+
+  .battle-log-state {
+    font-size: 11px;
+  }
+
+  .battle-end-card {
+    min-width: 240px;
+    padding: 22px 18px;
+  }
+
+  .battle-end-title {
+    font-size: 28px;
+  }
+
+  .battle-end-result {
+    font-size: 18px;
+  }
+
+  .battle-end-hint {
+    font-size: 14px;
   }
 }

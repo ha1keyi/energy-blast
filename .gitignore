@@ -27,3 +27,23 @@ playwright/.cache
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets and environment
+.env
+.env.*
+ngrok.yml
+.secrets
+*.pem
+*.key
+
+# Server-side node_modules
+/server/node_modules
+
+# Caches and coverage
+.cache
+.vite
+coverage
+.nyc_output
+
+# Ignore local Playwright artifacts
+.playwright

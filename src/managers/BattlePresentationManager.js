@@ -1,6 +1,19 @@
 import { BattleAnimationManager } from './RoundResolutionManager.js';
 import { BattleLayoutManager } from './BattleLayoutManager.js';
 
+function setAbsolutePosition(element, { x, y, width, height }) {
+    if (!element) return;
+    if (x != null) element.style.left = `${Math.round(x)}px`;
+    if (y != null) element.style.top = `${Math.round(y)}px`;
+    if (width != null) element.style.width = `${Math.round(width)}px`;
+    if (height != null) element.style.height = `${Math.round(height)}px`;
+}
+
+function toggleHidden(element, hidden) {
+    if (!element) return;
+    element.classList.toggle('hidden', !!hidden);
+}
+
 export class BattlePresentationManager {
     constructor(core, scene, options = {}) {
         this.core = core;
@@ -9,20 +22,41 @@ export class BattlePresentationManager {
         this.onChooseTarget = options.onChooseTarget || (() => { });
         this.onReturnLobby = options.onReturnLobby || (() => { });
         this.animationManager = new BattleAnimationManager(core, scene);
-        this.logContainer = this.scene.add.container(0, 0).setDepth(25);
-        this.hudContainer = this.scene.add.container(0, 0).setDepth(15);
-        this.pendingHint = this.scene.add.text(0, 0, '请选择攻击目标…', {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#000', backgroundColor: '#fff'
-        }).setOrigin(0.5).setDepth(20).setVisible(false);
-        this.endScreenContainer = this.scene.add.container(0, 0).setDepth(100).setVisible(false);
         this._disposed = false;
         this._logSignature = '';
         this._hudSignature = '';
         this._endSignature = '';
+
+        this.ensureOverlayElements();
+
         this.unsubscribeStore = this.core?.store?.subscribe?.(() => {
             if (this._disposed || !this.scene?.sys?.isActive?.()) return;
             this.refresh();
         }) || null;
+    }
+
+    ensureOverlayElements() {
+        const uiLayer = document.getElementById('ui-layer') || document.body;
+
+        let overlay = document.getElementById('battle-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'battle-overlay';
+            overlay.className = 'hidden';
+            overlay.innerHTML = [
+                '<div id="battle-hud"></div>',
+                '<div id="battle-pending-hint" class="hidden"></div>',
+                '<div id="battle-log-panel"></div>',
+                '<div id="battle-end-screen" class="hidden"></div>',
+            ].join('');
+            uiLayer.appendChild(overlay);
+        }
+
+        this.overlay = overlay;
+        this.hudRoot = overlay.querySelector('#battle-hud');
+        this.pendingHintEl = overlay.querySelector('#battle-pending-hint');
+        this.logRoot = overlay.querySelector('#battle-log-panel');
+        this.endScreenEl = overlay.querySelector('#battle-end-screen');
     }
 
     ensureAnimationManager() {
@@ -38,6 +72,7 @@ export class BattlePresentationManager {
     refresh() {
         if (this._disposed) return;
         this.ensureAnimationManager();
+        toggleHidden(this.overlay, false);
         this.refreshHUD();
         this.refreshPendingHint();
         this.refreshBattleLogPanel();
@@ -52,29 +87,34 @@ export class BattlePresentationManager {
         this._hudSignature = '';
         this._endSignature = '';
         this.clearHud();
-        this.logContainer.removeAll(true);
-        this.pendingHint.setVisible(false);
+        if (this.logRoot) this.logRoot.innerHTML = '';
+        if (this.pendingHintEl) {
+            this.pendingHintEl.textContent = '';
+            toggleHidden(this.pendingHintEl, true);
+        }
         this.hideEndScreen();
     }
 
     refreshPendingHint() {
         const position = this.layoutManager.getPendingHintPosition();
-        this.pendingHint.setPosition(position.x, position.y);
-        this.pendingHint.setVisible(!!window.pendingAttack && this.core?.gameState === 'selecting');
+        setAbsolutePosition(this.pendingHintEl, position);
+        if (this.pendingHintEl) {
+            this.pendingHintEl.textContent = '请选择攻击目标...';
+        }
+        toggleHidden(this.pendingHintEl, !(window.pendingAttack && this.core?.gameState === 'selecting'));
     }
 
     refreshHUD() {
-        if (!this.core) return;
+        if (!this.core || !this.hudRoot) return;
         const players = this.core.players || [];
         const localPlayerId = window.localPlayerId || players[0]?.id || null;
-        const self = players.find(player => player.id === localPlayerId) || null;
-        const others = players.filter(player => player.id !== localPlayerId);
+        const others = players.filter((player) => player.id !== localPlayerId);
         const metrics = this.layoutManager.getMetrics();
 
         const signature = JSON.stringify({
             round: this.core.currentRound,
             state: this.core.gameState,
-            players: players.map(player => ({
+            players: players.map((player) => ({
                 id: player.id,
                 networkId: player.networkId,
                 name: player.name,
@@ -95,69 +135,48 @@ export class BattlePresentationManager {
         others.forEach((player, index) => {
             const position = positions[index];
             if (!position) return;
-            const node = this.buildOpponentHud(player, position);
-            this.hudContainer.add(node);
+            this.hudRoot.appendChild(this.buildOpponentHud(player, position));
         });
-
-        if (self) {
-            const selfHud = this.buildSelfHud(self);
-            this.hudContainer.add(selfHud);
-        }
-
-        const roundStatePosition = this.layoutManager.getRoundStatusPosition();
-        const roundState = this.scene.add.text(roundStatePosition.x, roundStatePosition.y, this.getRoundStateText(), {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000', backgroundColor: '#fff'
-        }).setOrigin(0.5, 1).setDepth(15);
-        this.hudContainer.add(roundState);
     }
 
     buildOpponentHud(player, position) {
-        const container = this.scene.add.container(position.x, position.y).setDepth(10);
-        const width = 160;
-        const height = 60;
-        const baseX = position.align === 1 ? -width : (position.align === 0.5 ? -width / 2 : 0);
+        const card = document.createElement('button');
+        const alignClass = position.align === 1 ? 'align-right' : (position.align === 0.5 ? 'align-center' : 'align-left');
+        card.type = 'button';
+        card.className = `battle-card battle-opponent-card interactive ${alignClass}`;
+        setAbsolutePosition(card, position);
 
-        const shadow = this.scene.add.rectangle(baseX + 4, 4, width, height, 0x222222, 1).setOrigin(0, 0);
-        const bg = this.scene.add.rectangle(baseX, 0, width, height, 0xffffff, 1).setStrokeStyle(3, 0x000000).setOrigin(0, 0);
-        const name = this.scene.add.text(baseX + 12, 8, player.name, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '16px', color: '#000' }).setOrigin(0, 0);
-        const hpText = this.scene.add.text(baseX + 12, 32, `❤️ ${player.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: player.health <= 0 ? '#e74c3c' : '#000' }).setOrigin(0, 0);
-        const energyText = this.scene.add.text(baseX + 80, 32, `气 ${player.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '14px', color: '#000' }).setOrigin(0, 0);
-        const hit = this.scene.add.rectangle(baseX, 0, width, height, 0x000000, 0.001).setOrigin(0, 0).setInteractive({ cursor: 'pointer' });
+        const title = document.createElement('div');
+        title.className = 'battle-card-title';
+        title.textContent = player.name;
 
-        hit.on('pointerover', () => bg.setFillStyle(0xfafafa, 1));
-        hit.on('pointerout', () => bg.setFillStyle(0xffffff, 1));
-        hit.on('pointerdown', () => this.onChooseTarget(player));
+        const stats = document.createElement('div');
+        stats.className = 'battle-card-stats';
 
-        container.add([shadow, bg, name, hpText, energyText, hit]);
-        return container;
-    }
+        const hp = document.createElement('span');
+        hp.className = player.health <= 0 ? 'danger' : '';
+        hp.textContent = `❤ ${player.health}`;
 
-    buildSelfHud(player) {
-        const position = this.layoutManager.getSelfHudPosition();
-        const compact = this.layoutManager.getMetrics().compact;
-        const width = compact ? 220 : 260;
-        const height = compact ? 68 : 80;
-        const container = this.scene.add.container(position.x, position.y).setDepth(15);
-        const shadow = this.scene.add.rectangle(4, 4, width, height, 0x222222, 1);
-        const bg = this.scene.add.rectangle(0, 0, width, height, 0xffffff, 1).setStrokeStyle(3, 0x000000);
-        const name = this.scene.add.text(0, -20, `${player.name} (你)`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: compact ? '16px' : '18px', color: '#000' }).setOrigin(0.5, 0.5);
-        const energy = this.scene.add.text(-50, 10, `气: ${player.energy}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: compact ? '14px' : '16px', color: '#000' });
-        const health = this.scene.add.text(50, 10, `❤️: ${player.health}`, { fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: compact ? '14px' : '16px', color: player.health <= 0 ? '#ff0000' : '#000' });
-        container.add([shadow, bg, name, energy, health]);
-        return container;
+        const energy = document.createElement('span');
+        energy.textContent = `气 ${player.energy}`;
+
+        stats.append(hp, energy);
+        card.append(title, stats);
+        card.onclick = () => this.onChooseTarget(player);
+        return card;
     }
 
     clearHud() {
-        this.hudContainer.removeAll(true);
+        if (this.hudRoot) this.hudRoot.innerHTML = '';
     }
 
     refreshBattleLogPanel() {
-        if (this._disposed || !this.core) return;
+        if (this._disposed || !this.core || !this.logRoot) return;
 
         const logs = Array.isArray(this.core.logs) ? this.core.logs : [];
         const bounds = this.layoutManager.getBattleLogPanelBounds();
         const compact = this.layoutManager.getMetrics().compact;
-        const maxLines = compact ? 4 : Math.max(4, Math.floor((bounds.height - 38) / 18));
+        const maxLines = compact ? 4 : Math.max(4, Math.floor((bounds.height - 38) / 22));
         const recent = logs.slice(-maxLines).map((entry) => {
             const hasRound = entry && typeof entry === 'object' && entry.round != null;
             const round = hasRound ? entry.round : '';
@@ -171,64 +190,45 @@ export class BattlePresentationManager {
         if (signature === this._logSignature) return;
         this._logSignature = signature;
 
-        this.logContainer.removeAll(true);
+        this.logRoot.innerHTML = '';
 
-        const frame = this.scene.add.graphics().setDepth(25);
-        frame.fillStyle(0xffffff, 0.94);
-        frame.lineStyle(3, 0x000000, 1);
-        frame.fillRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, compact ? 12 : 16);
-        frame.strokeRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, compact ? 12 : 16);
+        const shell = document.createElement('div');
+        shell.className = 'battle-log-shell';
+        setAbsolutePosition(shell, bounds);
 
-        const title = this.scene.add.text(bounds.x + 12, bounds.y + 10, compact ? '本回合记录' : '战斗日志', {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif',
-            fontSize: compact ? '14px' : '16px',
-            color: '#000',
-        }).setOrigin(0, 0);
+        const header = document.createElement('div');
+        header.className = 'battle-log-header';
 
-        const hint = this.scene.add.text(bounds.x + bounds.width - 12, bounds.y + 12, this.describeState(), {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif',
-            fontSize: compact ? '11px' : '12px',
-            color: '#555',
-        }).setOrigin(1, 0);
+        const title = document.createElement('div');
+        title.className = 'battle-log-title';
+        title.textContent = compact ? '本回合记录' : '战斗日志';
 
-        this.logContainer.add([frame, title, hint]);
+        const hint = document.createElement('div');
+        hint.className = 'battle-log-state';
+        hint.textContent = this.describeState();
+
+        header.append(title, hint);
+        shell.appendChild(header);
 
         if (!recent.length) {
-            const empty = this.scene.add.text(bounds.x + 12, bounds.y + 40, '等待玩家选择行动...', {
-                fontFamily: 'ZCOOL KuaiLe, sans-serif',
-                fontSize: compact ? '12px' : '14px',
-                color: '#666',
-            }).setOrigin(0, 0);
-            this.logContainer.add(empty);
-            return;
+            const empty = document.createElement('div');
+            empty.className = 'battle-log-empty';
+            empty.textContent = '等待玩家选择行动...';
+            shell.appendChild(empty);
+        } else {
+            recent.forEach((lineText, index) => {
+                const row = document.createElement('div');
+                row.className = `battle-log-row${index % 2 === 0 ? ' alt' : ''}`;
+                row.textContent = lineText;
+                shell.appendChild(row);
+            });
         }
 
-        let offsetY = bounds.y + 40;
-        recent.forEach((lineText, index) => {
-            const rowBg = this.scene.add.rectangle(
-                bounds.x + bounds.width / 2,
-                offsetY + (compact ? 8 : 9),
-                bounds.width - 22,
-                compact ? 18 : 20,
-                index % 2 === 0 ? 0xf8f8f8 : 0xffffff,
-                0.9,
-            ).setOrigin(0.5, 0.5).setDepth(25);
-
-            const line = this.scene.add.text(bounds.x + 12, offsetY, lineText, {
-                fontFamily: 'ZCOOL KuaiLe, sans-serif',
-                fontSize: compact ? '12px' : '13px',
-                color: '#111',
-                wordWrap: { width: bounds.width - 30 },
-                maxLines: 1,
-            }).setOrigin(0, 0);
-
-            this.logContainer.add([rowBg, line]);
-            offsetY += compact ? 20 : 22;
-        });
+        this.logRoot.appendChild(shell);
     }
 
     refreshEndScreen() {
-        if (!this.core || this._disposed) return;
+        if (!this.core || this._disposed || !this.endScreenEl) return;
 
         if (this.core.gameState !== 'ended') {
             this.hideEndScreen();
@@ -237,91 +237,53 @@ export class BattlePresentationManager {
 
         const alivePlayers = this.core.getAlivePlayers();
         const winner = alivePlayers[0] || null;
+        const box = this.layoutManager.getEndScreenBox();
         const signature = JSON.stringify({
             state: this.core.gameState,
             winner: winner?.id || null,
             title: alivePlayers.length === 1 ? '胜 负 已 分' : '同 归 于 尽',
-            size: this.layoutManager.getEndScreenBox(),
+            box,
         });
-        if (signature === this._endSignature && this.endScreenContainer.visible) return;
+        if (signature === this._endSignature && !this.endScreenEl.classList.contains('hidden')) return;
         this._endSignature = signature;
 
-        const { width, height } = this.scene.scale;
-        const box = this.layoutManager.getEndScreenBox();
-        this.endScreenContainer.removeAll(true);
-        this.endScreenContainer.setVisible(true);
+        this.endScreenEl.innerHTML = '';
+        toggleHidden(this.endScreenEl, false);
 
-        const overlay = this.scene.add.rectangle(0, 0, width, height, 0xffffff, 0.8).setOrigin(0, 0);
-        const graphics = this.scene.add.graphics();
-        graphics.lineStyle(4, 0x000000, 1);
-        graphics.fillStyle(0xffffff, 1);
+        const overlay = document.createElement('div');
+        overlay.className = 'battle-end-overlay';
 
-        const points = [
-            { x: box.x - box.width / 2, y: box.y - box.height / 2 },
-            { x: box.x + box.width / 2, y: box.y - box.height / 2 },
-            { x: box.x + box.width / 2, y: box.y + box.height / 2 },
-            { x: box.x - box.width / 2, y: box.y + box.height / 2 }
-        ];
+        const card = document.createElement('div');
+        card.className = 'battle-end-card';
+        setAbsolutePosition(card, box);
 
-        graphics.beginPath();
-        graphics.moveTo(points[0].x + (Math.random() - 0.5) * 5, points[0].y + (Math.random() - 0.5) * 5);
-        for (let i = 1; i <= points.length; i++) {
-            const point = points[i % points.length];
-            graphics.lineTo(point.x + (Math.random() - 0.5) * 5, point.y + (Math.random() - 0.5) * 5);
-        }
-        graphics.closePath();
-        graphics.fillPath();
-        graphics.strokePath();
+        const title = document.createElement('div');
+        title.className = 'battle-end-title';
+        title.textContent = alivePlayers.length === 1 ? '胜 负 已 分' : '同 归 于 尽';
 
-        const titleText = alivePlayers.length === 1 ? '胜 负 已 分' : '同 归 于 尽';
-        const title = this.scene.add.text(box.x, box.y - 100, titleText, {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '40px', color: '#000'
-        }).setOrigin(0.5);
+        const result = document.createElement('div');
+        result.className = 'battle-end-result';
+        result.textContent = winner ? `获胜者: ${winner.name}` : '没有活下来的玩家';
 
-        const resultText = winner ? `获胜者: ${winner.name}` : '没有活下来的玩家';
-        const result = this.scene.add.text(box.x, box.y - 28, resultText, {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '24px', color: '#000'
-        }).setOrigin(0.5);
+        const hint = document.createElement('div');
+        hint.className = 'battle-end-hint';
+        hint.textContent = '5 秒后自动返回房间';
 
-        const hint = this.scene.add.text(box.x, box.y + 18, '5 秒后自动返回房间', {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '18px', color: '#444'
-        }).setOrigin(0.5);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'battle-end-action interactive';
+        button.textContent = '返回房间';
+        button.onclick = () => this.onReturnLobby();
 
-        const exitBtn = this.createHandDrawnButton(box.x, box.y + 84, 180, 52, '返回房间', () => this.onReturnLobby());
-
-        this.endScreenContainer.add([overlay, graphics, title, result, hint, ...exitBtn]);
-        this.endScreenContainer.setAlpha(0);
-        this.scene.tweens.add({ targets: this.endScreenContainer, alpha: 1, duration: 500, ease: 'Power2' });
+        card.append(title, result, hint);
+        this.endScreenEl.append(overlay, card, button);
     }
 
     hideEndScreen() {
-        this.endScreenContainer.setVisible(false);
-        this.endScreenContainer.removeAll(true);
+        if (!this.endScreenEl) return;
+        this.endScreenEl.innerHTML = '';
+        toggleHidden(this.endScreenEl, true);
         this._endSignature = '';
-    }
-
-    createHandDrawnButton(x, y, width, height, text, onClick) {
-        const container = this.scene.add.container(x, y);
-        const bg = this.scene.add.rectangle(0, 0, width, height, 0xffffff, 1).setStrokeStyle(3, 0x000000).setInteractive({ cursor: 'pointer' });
-        const label = this.scene.add.text(0, 0, text, {
-            fontFamily: 'ZCOOL KuaiLe, sans-serif', fontSize: '20px', color: '#000'
-        }).setOrigin(0.5);
-        bg.on('pointerover', () => bg.setFillStyle(0xeeeeee, 1));
-        bg.on('pointerout', () => bg.setFillStyle(0xffffff, 1));
-        bg.on('pointerdown', onClick);
-        container.add([bg, label]);
-        return [container];
-    }
-
-    getRoundStateText() {
-        const stateText = this.core.gameState === 'selecting'
-            ? '选择行动'
-            : this.core.gameState === 'resolving'
-                ? '结算中'
-                : this.core.gameState === 'idle'
-                    ? '准备中'
-                    : '已结束';
-        return `第 ${this.core.currentRound} 轮 · ${stateText}`;
     }
 
     describeState() {
@@ -339,15 +301,17 @@ export class BattlePresentationManager {
         this.hideEndScreen();
         this.animationManager.cleanup();
         this.clearHud();
-        this.hudContainer.destroy();
-        this.pendingHint.destroy();
-        this.logContainer.removeAll(true);
-        this.logContainer.destroy();
-        this.endScreenContainer.destroy();
-        this.logContainer = null;
-        this.hudContainer = null;
-        this.pendingHint = null;
-        this.endScreenContainer = null;
+        if (this.logRoot) this.logRoot.innerHTML = '';
+        if (this.pendingHintEl) {
+            this.pendingHintEl.textContent = '';
+            toggleHidden(this.pendingHintEl, true);
+        }
+        toggleHidden(this.overlay, true);
+        this.overlay = null;
+        this.hudRoot = null;
+        this.pendingHintEl = null;
+        this.logRoot = null;
+        this.endScreenEl = null;
         this._logSignature = '';
         this._hudSignature = '';
         this._endSignature = '';
