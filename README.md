@@ -11,24 +11,8 @@
 npm install
 ```
 
-2. 启动开发服务器（客户端）：
+2. 启动（服务端）：
 
 ```bash
-npm run dev
+node start.js
 ```
-
-3. 启动后端（可选）：
-
-```bash
-cd server
-npm install
-npm start
-```
-
-（仓库中也包含 `start.js` 脚本，可用于同时启动前后端：`node start.js`）
-
-更多信息
-- 若需运行 E2E 测试：`npm run test:e2e`。
-- 若想构建发布包：`npm run build`。
-
-如果需要我把 README 翻译成英文或补充开发者文档，请告诉我。
